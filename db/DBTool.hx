@@ -210,17 +210,20 @@ class DBTool {
     var dup_names = new Hash();
     var dupFields = new Hash();
     data.tables.foreach(function(table){
+
         if (dup_names.exists(table.name))
           throw "table "+table.name+" was decalred twice!";
+
         dupFields.empty();
         table.fields.foreach(function(f){
             var n = table.name+"."+f.name;
-            h.set(n, f.__uniq);
+            h.set(n, f);
             if (dupFields.exists(f.name))
               throw "field "+n+" was decalred twice!";
             dupFields.set(f.name, true);
             return true;
         });
+
         dup_names.set(table.name, true);
         return true;
     });
@@ -230,7 +233,9 @@ class DBTool {
           if (f.__references != null){
               var n = f.__references.table+"."+f.__references.field;
               if (!h.exists(n)) throw "a the field "+n+" is referenced by "+table.name+"."+f.name+" but doesn't exist";
-              if (!h.get(n)) throw table.name+"."+f.name+" is referencing "+n+" which therefor must be uniq! (PG only .. still adviced)";
+              var referenced = h.get(n);
+              if (!referenced.__uniq) throw table.name+"."+f.name+" is referencing "+n+" which therefore must be uniq! (PG only .. still adviced)";
+              if (f.type != referenced.type) throw table.name+"."+f.name+" is referencing "+n+"but field types differ";
           };
           return true;
       });
@@ -270,7 +275,7 @@ class DBTool {
     // get latest scheme from db:
     var has_rows = 0 < db_.request("SELECT count(*) FROM "+db_version_table).getIntResult(0); // use LIMIT?
     var max_db =
-      has_rows ? db_.request("SELECT max(version) FROM "+db_version_table).getIntResult(0);
+      has_rows ? db_.request("SELECT max(version) FROM "+db_version_table).getIntResult(0)
       : 0;
     for (scheme in  (max_db+1 ... max+1)){
       info("updating to "+scheme);
