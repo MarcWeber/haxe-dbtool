@@ -116,5 +116,6 @@ additionaly HaXe code for whatever reason.
 
 == THIS IS WORK IN PROGRESS ==
 So expect
-* API changes
-* incomplete implementation
+  * API changes
+  * incomplete implementation
+

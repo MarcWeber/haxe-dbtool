@@ -61,6 +61,35 @@ class DBHelper {
   }
 }
 
+// not sure about whether this is the best implementation.. ?
+// Idea: replace this object if you want different db type to HaXe mapping
+class DBMapper {
+
+  public function new() {
+  }
+
+  public function dbToHaxeType(t:DBToolFieldType){
+
+    return switch (t){
+      case db_varchar(length):
+        { haxeType: "String" };
+      case db_bool:
+        { haxeType: "Bool" };
+      case db_int:
+        { haxeType: "Int" };
+      case db_enum(valid_items):
+        { haxeType: "String" };
+      case db_date_auto(onInsert, onUpdate):
+        { haxeType: "Date" };
+      case db_date:
+        { haxeType: "Date" };
+      case db_haxe_enum_simple_as_index(e):
+        { haxeType: e };
+    }
+
+  }
+}
+
 // represents a field
 class DBField implements IDBSerializable {
 
@@ -286,14 +315,28 @@ class DBField implements IDBSerializable {
 // represents a table
 class DBTable implements IDBSerializable {
 
-  public var primaryKeys: List<String>;
+  public var primaryKeys: Array<String>;
   public var name:String;
   public var fields: Array<DBField>;
+  public var __SPODClassName: String; // name of generated class
+  public var __createSPODClass: Bool; // if true SPOD class file will be created or updated
 
   // TODO extend by keys etc
-  public function new(name, fields) {
+  public function new(name, primaryKeys: Array<String>, fields) {
     this.fields = fields;
     this.name = name;
+    this.primaryKeys = primaryKeys;
+    this.__SPODClassName = name;
+  }
+
+  public function createSPODClass (b:Bool){
+    this.__createSPODClass = b;
+    return this;
+  }
+
+  public function className(n:String){
+    this.__SPODClassName=n;
+    return this;
   }
 
   // serialization {{{2
@@ -349,6 +392,7 @@ class DBTable implements IDBSerializable {
             requests.push(
               "CREATE TABLE "+new_.name+ "(\n"
               + fields +"\n"
+              + (new_.primaryKeys.length > 0 ? ", PRIMARY KEY ("+ new_.primaryKeys.join(", ")+") \n" : "" )
               +") WITH OIDS;\n");
             requests = requests.concat(after);
 
@@ -375,6 +419,14 @@ class DBTable implements IDBSerializable {
           for (k in changeSets.o){ pushAll(DBField.toSQL(db_, new_.name, k.o, k.n, true)); }
           for (o in changeSets.o){ pushAll(DBField.toSQL(db_, new_.name, o, null, true)); }
 
+          if (old.primaryKeys != new_.primaryKeys){
+            if (old.primaryKeys.length > 0)
+              requests.push("ALTER TABLE "+old.name+" DROP CONSTRAINT "+old.name+"_pkey");
+
+            if (new_.primaryKeys.length > 0)
+              requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
+          }
+
         }
 
       // MySQL case {{{2
@@ -393,6 +445,14 @@ class DBTable implements IDBSerializable {
         } else {
           // change table
 
+
+          if (old.primaryKeys != new_.primaryKeys){
+            if (old.primaryKeys.length > 0)
+              requests.push("ALTER TABLE "+old.name+" DROP PRIMARY KEY");
+
+            if (new_.primaryKeys.length > 0)
+              requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
+          }
           throw "MySQL TODO";
         }
     } // }}}
