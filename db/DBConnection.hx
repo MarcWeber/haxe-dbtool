@@ -2,7 +2,6 @@ package db;
 import neko.db.Connection;
 
 using Type;
-using Reflect;
 using Lambda;
 
 // same as neko.db.Connection. But adds more features
@@ -32,7 +31,7 @@ class DBConnection {
   // very simple form of placeholders {{{2
 
   // run query quoted by susbtPH
-  public function requestPH(cnx: Connection, query:String, args:Array<Dynamic>){
+  public function requestPH(query:String, args:Array<Dynamic>){
     return cnx.request(substPH(query, args));
   }
 
@@ -40,6 +39,7 @@ class DBConnection {
   //   ? : quoted value
   //   ?v: insert string verbatim (without quoting)
   //   ?n: quote name (table or field name)
+  //   ?l: quote list for use in  WHERE field IN (a,b,c)
   //
   //   cnx.substPH("INSERT INSTO ?n VALUES (?,?,?v)", [ "table name", value1, value2.toString(), cnx.quote("a string")] )
   // note: the caller is responsible for converting a value into a string like
@@ -50,19 +50,30 @@ class DBConnection {
     s.add(parts[0]);
     for( i in 1 ... parts.length ){
         var s_ = parts[i];
-        var a = args[i-1];
+        var a:Dynamic = args[i-1];
         switch (s_.charAt(0)){
-          case "n":
-            cnx.addValue(s,a);
+          case "n": // ?n
+            s.add(this.quoteName(a));
             s.addSub(s_, 1, s_.length-1);
-          case "v":
+          case "v": // ?v
             s.add(a);
             s.addSub(s_, 1, s_.length-1);
-          case "w":
-          /* maybe this "w" case doesn't make much sense? */
+          case "w": // ?w
             s.add(this.whereANDObj(a));
             s.addSub(s_, 1, s_.length-1);
-          default:
+          case "l": // ?l
+            var first = true;
+            s.add("(");
+            var l:Array<Dynamic> = cast(a);
+            for (x in l){
+              if (!first)
+                s.add(",");
+              first = false;
+              cnx.addValue(s, x);
+            }
+            s.add(")");
+            s.addSub(s_, 1, s_.length-1);
+          default: // ?
             cnx.addValue(s,a);
             s.add(s_);
         }
@@ -76,14 +87,14 @@ class DBConnection {
   // bascially this is what all the managers do for SPOD - but more generic
   // No need to have multiple implementations!
   public function insert(table:String, o:Dynamic, ?fields: Array<String>){
-    var names = (fields == null ) ? o.intsanceFields() : fields;
+    var names = (fields == null ) ? Reflect.fields(o) : fields;
 
     var fields = new List();
     var values = new List();
 
     for( n in names ) {
       fields.add(this.quoteName(n));
-      values.add(o.field(n));
+      values.add(this.quote(Reflect.field(o,n)));
     }
 
     var s = new StringBuf();
@@ -94,13 +105,14 @@ class DBConnection {
     s.add(") VALUES (");
     s.add(values.join(","));
     s.add(")");
+    trace("query is"+s.toString());
 
     return this.request(s.toString());
   }
 
 
   public function whereANDstr(l:Array<String>){
-        return "( (" + l.join(" ) AND  (" ) + ") )";
+        return "( (" + l.join(") AND (" ) + ") )";
   }
 
   // generate the WHERE part of a query using AND
@@ -108,18 +120,19 @@ class DBConnection {
   // cnx.substPH("UPDATE foo SET abc = ? WHERE ?w ", [ 10, {name : "abc"} ] )
   public function whereANDObj(o:Dynamic, ?fields: Array<String>){
 
-    var names = (fields == null ) ? o.intsanceFields() : fields;
+    var names = (fields == null ) ? Reflect.fields(o) : fields;
 
     switch (names.length){
       case 0:
         return "1 == 1";
       case 1:
         var n = names[0];
-        return this.quoteName(n)+" = "+o.field(n);
+        return this.quoteName(n)+" = "+this.quote(Reflect.field(o, n));
+        return "";
       default:
         var l = new List();
         for (n in names){
-          l.add( this.quoteName(n)+" = "+o.field(n) );
+          l.add( this.quoteName(n)+" = "+this.quote(Reflect.field(o,n)) );
         }
         return whereANDstr(l.array());
     }
@@ -132,12 +145,12 @@ class DBConnection {
 
   // example usage: cnx.update("users", {name: "A.B"}, null, {id: 10});
   public function update(table:String, values:Dynamic, ?valueFields: Array<String>, where:Dynamic, whereFields:Array<String>){
-    var valueNames = (valueFields == null) ? values.intsanceFields() : valueFields;
+    var valueNames = (valueFields == null) ? Reflect.fields(values) : valueFields;
 
     var sets = new List();
 
     for( n in valueNames ) {
-      sets.add(this.quoteName(n)+"="+values.field(n));
+      sets.add(this.quoteName(n)+"="+Reflect.field(values,n));
     }
 
     return this.request("UPDATE "+this.quoteName(table)+" WHERE "+this.whereANDObj(where, whereFields));

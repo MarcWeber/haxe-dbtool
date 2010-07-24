@@ -14,27 +14,25 @@ import hxunit.respond.CompositeResponder;
 import hxunit.respond.Responder;
 
 
-using hxunit.Assert;
-
-// project is too pre alpha
-
 class Test_DBConnection extends TestCase {
 
   var con : DBConnection;
 
-  override function setup(){
+  public function new(){
+    super();
     this.con = new DBConnection(new Stub_Connection());
-    super.setup();
   }
 
-
   function testAll(){
-
      // quoteName can't be tested
-     assertEquals(con.substPH("?v", ["abc"]),"abc");
-     assertEquals(con.substPH("?", ["abc"]),"\"abc\"");
-     assertEquals(con.substPH("?w", [{a:"a",b:"b"}]),"( (a = \"a\") AND (b = \"b\") )");
+     assertEquals("abc", con.substPH("?v", ["abc"]));
+     assertEquals("\"abc\"", con.substPH("?", ["abc"]));
 
+     assertEquals("a = \"b\"", con.whereANDObj({a:"b"}));
+     assertEquals("( (a = \"b\") AND (c = \"d\") )", con.whereANDObj({a:"b",c:"d"}));
+     assertEquals("( (a = \"a\") AND (b = \"b\") )", con.substPH("?w", [{a:"a",b:"b"}]));
+
+     assertEquals("(\"1\",\"2\",\"3\",\"4\")", con.substPH("?l", [[1,2,3,4]]));
   }
 
 }

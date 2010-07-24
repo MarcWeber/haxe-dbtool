@@ -113,6 +113,22 @@ Example:
 Usually you want to tweak the update step before running it. Eg you can add
 additionaly HaXe code for whatever reason.
 
+== RUN TEST SUITE ==
+
+Create a file with these contents:
+
+      localhost
+      3306
+      MYSQL_USER
+      MYSQL_PASSWORD
+
+      MYSQL_DATABASE
+
+Then run
+
+      haxe tests_php.hxml
+      php dist-php/Test.php
+
 
 == THIS IS WORK IN PROGRESS ==
 So expect
