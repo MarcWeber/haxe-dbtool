@@ -10,9 +10,12 @@ enum DBToolFieldType {
   db_int;
   db_enum( valid_items: List<String> );
   db_date;
+  db_text; // text field. arbitrary length. Maybe no indexing and slow searching
   db_date_auto(onInsert: Bool, onUpdate: Bool);
-  // store enum constructor as name. params are not stored!
-  // sohuld be e:Enum<Dynamic> Bet that can't be serialized
+
+  // store ints instead of the named Enum. Provide getter and setters for enum
+  // values. Take care when remving or replacing enum values. You have to
+  // adjust the inedxes then
   db_haxe_enum_simple_as_index(e:String);
 }
 
@@ -58,35 +61,6 @@ class DBHelper {
         new_.add(n_);
     }
     return { o: hash.list(), k: keep, n: new_};
-  }
-}
-
-// not sure about whether this is the best implementation.. ?
-// Idea: replace this object if you want different db type to HaXe mapping
-class DBMapper {
-
-  public function new() {
-  }
-
-  public function dbToHaxeType(t:DBToolFieldType){
-
-    return switch (t){
-      case db_varchar(length):
-        { haxeType: "String" };
-      case db_bool:
-        { haxeType: "Bool" };
-      case db_int:
-        { haxeType: "Int" };
-      case db_enum(valid_items):
-        { haxeType: "String" };
-      case db_date_auto(onInsert, onUpdate):
-        { haxeType: "Date" };
-      case db_date:
-        { haxeType: "Date" };
-      case db_haxe_enum_simple_as_index(e):
-        { haxeType: e };
-    }
-
   }
 }
 
@@ -152,6 +126,121 @@ class DBField implements IDBSerializable {
   public function comment(c:String) {
     this.__comment = c;
     return this;
+  }
+
+
+  // defines the DB <-> HaXe interface for this type
+  public function haxe(db: DBSupportedDatabaseType):{
+    // the db field type (TODO not yet used. Refactor!)
+    dbType: String,
+
+    // the HaXe type to be used
+    haxeType: String,
+
+    // the "public var field: Field;" line
+    // may also contain additional getter/ setter code (eg enum type)
+    // also contains NAMEtoHaxe NAMEToDB which converts HaXe <-> db types
+    // this is inlined id func except enum types and such
+    spodCode: String
+
+    // TODO add DB setup and teardown hooks. eg autoincrement for Postgres
+  }
+  {
+
+
+    switch (type){
+      case db_varchar(length):
+        return {
+          dbType:  "varchar("+length+")",
+          haxeType: "String",
+          spodCode:
+            "  public var "+name+":String;\n"+
+            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
+            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+        };
+      case db_bool:
+        return {
+          dbType: "varchar(1)", // every db has varchar
+          haxeType: "Bool",
+          spodCode:
+            "  public var "+name+":Bool;\n"+
+            "  static inline public function "+name+"ToHaXe(v: String):Bool { return (v == \"y\"); }\n"+ 
+            "  static inline public function "+name+"ToDB(v: Bool):String { return v ? \"y\" : \"n\"; }\n"
+        };
+      case db_int:
+        return {
+          dbType: "Int",
+          haxeType: "Int",
+          spodCode:
+            "  public var "+name+":Int;\n"+
+            "  static inline public function "+name+"ToHaXe(v: Int):Int { return v; }\n"+
+            "  static inline public function "+name+"ToDB(v: Int):Int { return v; }\n"
+
+        };
+      case db_enum(valid_items):
+        return {
+          dbType: "String",
+          haxeType: "String",
+          spodCode:
+            "  public var "+name+":String;\n"+
+            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
+            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+        };
+      case db_date_auto(onInsert, onUpdate):
+        // TODO
+        return {
+          dbType: "Date",
+          haxeType: "Date",
+          spodCode:
+            "  public var "+name+":String;\n"+
+            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
+            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+
+        };
+      case db_date:
+        // TODO
+        return{ 
+          dbType: "Date",
+          haxeType: "Date",
+          spodCode:
+            "  public var "+name+":String;\n"+
+            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
+            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+
+        };
+      case db_text:
+        var dbType = switch (db){
+          case db_postgres: "text";
+          default: "text";
+        }
+        return {
+          dbType: dbType,
+          haxeType: "String",
+          spodCode:
+            "  public var "+name+":String;\n"+
+            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
+            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+
+        };
+      case db_haxe_enum_simple_as_index(e):
+        var gt = "get"+name+"AsEnum";
+        var st = "set"+name+"AsEnum";
+        var tE = name+"toEnum";
+        return {
+          dbType: "int",
+          haxeType: e,
+          spodCode:
+            "  public var "+name+":Int;\n"+
+            "  static inline public function "+name+"ToHaXe(i:Int):"+e+"{ return Type.createEnumIndex("+e+", i); }\n"+
+            "  static inline public function "+name+"ToDB(v: "+e+"):Int { return Type.enumIndex(v); }\n"+
+            // getter + setter
+            "   public var "+name+"AsEnum("+gt+", "+st+") : "+e+";\n"+
+            "   function "+gt+"():"+e+"{ return  "+name+"ToHaXe("+name+"); }\n"+
+            "   function "+st+"(value : "+e+") :"+e+"{ "+name+" = "+name+"ToDB(value); return value; }\n"
+        };
+    }
+
+
   }
 
   // returns message if type can't be represented in a dabatase
@@ -231,23 +320,26 @@ class DBField implements IDBSerializable {
              case db_date:
                return { field: [alter + new_.name+" timestamp " + uniq + nullable + comment + references], sql_before : null, sql_after: null }
 
-             case db_haxe_enum_simple_as_index(e):
-               return { field: [alter + new_.name+" int" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+            case db_text:
+              return { field: [alter + new_.name+" text" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+
+            case db_haxe_enum_simple_as_index(e):
+              return { field: [alter + new_.name+" int" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
           }
 
         } else if (new_ == null) {
           // drop field
           
-          DBHelper.assert(alter, "alter should have been set to true");
           var res = new Array();
           res.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
 
           // only cleanup enum field
-          switch (new_.type){
+          switch (old.type){
             case db_varchar(length):
             case db_bool:
             case db_int:
             case db_date:
+            case db_text:
             case db_date_auto(onInsert, onUpdate):
             case db_haxe_enum_simple_as_index(e):
             case db_enum(valid_items):
@@ -271,7 +363,6 @@ class DBField implements IDBSerializable {
           var nullable = (new_.nullable) ? "" : " NOT NULL ";
           var alter = alter ? "ALTER TABLE "+tableName+ " ADD " : "";
           var references = ( new_.__references == null ) ? "": " REFERENCES " + new_.__references.table + "("+ new_.__references.field + ")";
-
           switch (new_.type){
             case db_varchar(length):
               return { field: [alter + new_.name+" varchar("+length+")" + nullable + comment + references], sql_before : null, sql_after : null }
@@ -286,6 +377,9 @@ class DBField implements IDBSerializable {
             case db_date:
               throw "TODO";
               // return { field: nalter + ew_.name+" time" + nullable + comment + references, sql_before : null, sql_after : null }
+
+            case db_text:
+              return { field: [alter + new_.name+" longtext" + nullable + comment + references], sql_before : null, sql_after : null }
             case db_date_auto(onInsert, onUpdate):
               throw "TODO";
               var ins = onInsert ? " default CURRENT_TIMESTAMP " : "";
@@ -327,6 +421,7 @@ class DBTable implements IDBSerializable {
     this.name = name;
     this.primaryKeys = primaryKeys;
     this.__SPODClassName = name;
+    this.__createSPODClass = true;
   }
 
   public function createSPODClass (b:Bool){

@@ -119,3 +119,5 @@ So expect
   * API changes
   * incomplete implementation
 
+TODO:
+  throw Exceptions if Strings are used which are too long
