@@ -16,6 +16,10 @@ class DBConnection {
 
   public var cnx : neko.db.Connection;
 
+  public function new(cnx) {
+    this.cnx = cnx;
+  }
+
   // new stuff {{{
 
 
@@ -29,7 +33,7 @@ class DBConnection {
 
   // run query quoted by susbtPH
   public function requestPH(cnx: Connection, query:String, args:Array<Dynamic>){
-    return cnx.request(substPH(cnx, query, args));
+    return cnx.request(substPH(query, args));
   }
 
   // substitute placeholders
@@ -40,7 +44,7 @@ class DBConnection {
   //   cnx.substPH("INSERT INSTO ?n VALUES (?,?,?v)", [ "table name", value1, value2.toString(), cnx.quote("a string")] )
   // note: the caller is responsible for converting a value into a string like
   //       thing which is understood by the database.
-  public function substPH(cnx: Connection, query:String, args:Array<Dynamic>){
+  public function substPH(query:String, args:Array<Dynamic>):String{
     var parts = query.split("?");
     var s:StringBuf = new StringBuf();
     s.add(parts[0]);
@@ -49,7 +53,7 @@ class DBConnection {
         var a = args[i-1];
         switch (s_.charAt(0)){
           case "n":
-            s.add(this.quoteName(a));
+            cnx.addValue(s,a);
             s.addSub(s_, 1, s_.length-1);
           case "v":
             s.add(a);
@@ -59,7 +63,7 @@ class DBConnection {
             s.add(this.whereANDObj(a));
             s.addSub(s_, 1, s_.length-1);
           default:
-            cnx.quote(a);
+            cnx.addValue(s,a);
             s.add(s_);
         }
     }

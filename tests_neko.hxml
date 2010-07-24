@@ -1,0 +1,3 @@
+-main tests.Test
+-cp /home/marc/managed_repos/haxe-hxunit
+-neko Test.n

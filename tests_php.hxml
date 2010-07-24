@@ -1,0 +1,5 @@
+-main tests.Test
+-cp /home/marc/managed_repos/haxe-hxunit
+--php-front Test.php
+--remap neko:php
+-php dist-php
