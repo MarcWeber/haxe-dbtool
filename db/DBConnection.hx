@@ -125,14 +125,19 @@ class DBConnection {
     switch (names.length){
       case 0:
         return "1 == 1";
+      /*
       case 1:
         var n = names[0];
         return this.quoteName(n)+" = "+this.quote(Reflect.field(o, n));
         return "";
+      */
       default:
         var l = new List();
         for (n in names){
-          l.add( this.quoteName(n)+" = "+this.quote(Reflect.field(o,n)) );
+          var v = Reflect.field(o,n);
+          l.add( this.quoteName(n)
+                + (v == null ? " IS NULL " : " = "+this.quote(v) )
+              );
         }
         return whereANDstr(l.array());
     }

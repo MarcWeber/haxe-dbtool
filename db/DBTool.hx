@@ -134,6 +134,10 @@ class DBTool {
           generatedCode.push("  static inline public function get("+args.join(", ")+"):"+t.__SPODClassName+"{");
           generatedCode.push("    return manager.getWithKeys({"+assignments.join(", ")+"});");
           generatedCode.push("  }");
+
+          generatedCode.push("  static inline public function getOrNew("+args.join(", ")+"):"+t.__SPODClassName+"{");
+          generatedCode.push("    return manager.getOrNewWithKeys({"+assignments.join(", ")+"});");
+          generatedCode.push("  }");
       }
 
       // table name
@@ -159,7 +163,7 @@ class DBTool {
         lines.push("class "+t.__SPODClassName+" extends neko.db.Object {");
 
         lines = lines.concat(generatedCode);
-        lines.push("   public static var manager = new neko.db.Manager<"+t.__SPODClassName+">("+t.__SPODClassName+");");
+        lines.push("   public static var manager = new db.DBManager<"+t.__SPODClassName+">("+t.__SPODClassName+");");
         lines.push("}");
       } else {
         var parsed = parseSpodObject(file);

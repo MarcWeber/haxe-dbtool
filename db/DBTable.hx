@@ -129,6 +129,20 @@ class DBField implements IDBSerializable {
   }
 
 
+  function field(name:String, haxeType:String){
+     return
+       "  private var _"+name+": "+haxeType+";\n"+
+       "  public var "+name+"(get"+name+", set"+name+") : "+haxeType+";\n"+
+       "  private function get"+name+"(): "+haxeType+" {\n"+
+       "     return _"+name+";\n"+
+       "  }\n"+
+       "  private function set"+name+"(value : "+haxeType+"): "+haxeType+" {\n"+
+       "    if (value == _"+name+") return _"+name+";\n"+
+       "    this.__dirty_data = true;\n"+
+       "    return _"+name+" = value;\n"+
+       "  }\n";
+  }
+
   // defines the DB <-> HaXe interface for this type
   public function haxe(db: DBSupportedDatabaseType):{
     // the db field type (TODO not yet used. Refactor!)
@@ -154,7 +168,7 @@ class DBField implements IDBSerializable {
           dbType:  "varchar("+length+")",
           haxeType: "String",
           spodCode:
-            "  public var "+name+":String;\n"+
+            field(name, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
         };
@@ -163,7 +177,7 @@ class DBField implements IDBSerializable {
           dbType: "varchar(1)", // every db has varchar
           haxeType: "Bool",
           spodCode:
-            "  public var "+name+":Bool;\n"+
+            field(name, "Bool")+
             "  static inline public function "+name+"ToHaXe(v: String):Bool { return (v == \"y\"); }\n"+ 
             "  static inline public function "+name+"ToDB(v: Bool):String { return v ? \"y\" : \"n\"; }\n"
         };
@@ -172,7 +186,7 @@ class DBField implements IDBSerializable {
           dbType: "Int",
           haxeType: "Int",
           spodCode:
-            "  public var "+name+":Int;\n"+
+            field(name, "Int")+
             "  static inline public function "+name+"ToHaXe(v: Int):Int { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: Int):Int { return v; }\n"
 
@@ -182,7 +196,7 @@ class DBField implements IDBSerializable {
           dbType: "String",
           haxeType: "String",
           spodCode:
-            "  public var "+name+":String;\n"+
+            field(name, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
         };
@@ -192,7 +206,7 @@ class DBField implements IDBSerializable {
           dbType: "Date",
           haxeType: "Date",
           spodCode:
-            "  public var "+name+":String;\n"+
+            field(name, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
 
@@ -203,7 +217,7 @@ class DBField implements IDBSerializable {
           dbType: "Date",
           haxeType: "Date",
           spodCode:
-            "  public var "+name+":String;\n"+
+            field(name, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
 
@@ -217,7 +231,7 @@ class DBField implements IDBSerializable {
           dbType: dbType,
           haxeType: "String",
           spodCode:
-            "  public var "+name+":String;\n"+
+            field(name, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
 
@@ -230,7 +244,7 @@ class DBField implements IDBSerializable {
           dbType: "int",
           haxeType: e,
           spodCode:
-            "  public var "+name+":Int;\n"+
+            field(name, "Int")+
             "  static inline public function "+name+"ToHaXe(i:Int):"+e+"{ return Type.createEnumIndex("+e+", i); }\n"+
             "  static inline public function "+name+"ToDB(v: "+e+"):Int { return Type.enumIndex(v); }\n"+
             // getter + setter
