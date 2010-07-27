@@ -9,19 +9,19 @@ class DBResultSet implements neko.db.ResultSet{
     this.set = resultSet;
   }
 
-  public function getIntCol() {
+  public function getIntCol():List<Int> {
     var l = new List();
     while(this.set.next() != null) {
       l.add(set.getIntResult(0));
     };
     return l;
   }
-  public function getCol() {
+  public function getCol():List<String> {
     var l = new List();
     while(this.set.next() != null) l.add(this.set.getResult(0));
     return l;
   }
-  public function getHash() {
+  public function getHash():Hash<Dynamic> {
     var h = new Hash();
     while(this.set.next() != null) h.set(this.set.getResult(0), this.set.next());
     return h;
