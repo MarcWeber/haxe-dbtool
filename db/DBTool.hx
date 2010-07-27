@@ -310,7 +310,11 @@ class DBTool {
     // check references
     var h = new Hash();
     var dup_names = new Hash();
+    var tablesByName = new Hash();
+
     for (table in data.tables){
+
+        tablesByName.set(table.name, table);
 
         if (dup_names.exists(table.name))
           throw "table "+table.name+" was declared twice!";
@@ -336,10 +340,16 @@ class DBTool {
 
         for (f in table.fields){
           if (f.__references != null){
-              var n = f.__references.table+"."+f.__references.field;
+              var ref_tableName = f.__references.table;
+              var ref_field = f.__references.field;
+              var n = f.__references.table+"."+ref_field;
+              if (!tablesByName.exists(ref_tableName))
+                throw "referenced table "+ref_tableName+" does not exist!";
+              var referenced_table = tablesByName.get(ref_tableName);
               if (!h.exists(n)) throw "a the field "+n+" is referenced by "+table.name+"."+f.name+" but doesn't exist";
               var referenced = h.get(n);
-              if (!referenced.__uniq) throw table.name+"."+f.name+" is referencing "+n+" which therefore must be uniq! (PG only .. still adviced)";
+              var ref_pkeys = referenced_table.primaryKeys;
+              if (!referenced.__uniq && !(ref_pkeys.length == 1 && ref_pkeys[0] == ref_field)) throw table.name+"."+f.name+" is referencing "+n+" which therefore must be uniq! (PG only .. still adviced)";
               if (f.type != referenced.type) throw table.name+"."+f.name+" is referencing "+n+"but field types differ";
           }
         }

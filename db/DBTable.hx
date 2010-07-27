@@ -1,7 +1,6 @@
 package db;
 
 using Lambda;
-using HaxeUtil;
 
 // representing a database scheme
 
@@ -40,6 +39,9 @@ interface IDBSerializable {
 }
 
 class DBHelper {
+  static public function concatArrays<T>(lists:List<Array<T>>): Array<T> {
+    return lists.fold(function(a,b){return a.concat(b);}, []);
+  }
   static public inline function assert(b:Bool, msg:String){ if (!b) throw msg; }
   static public function sep(o:Array<Dynamic>, n:Array<Dynamic>)
   :{o: List<Dynamic>, k: List<{o: Dynamic, n:Dynamic}>, n: List<Dynamic>}
@@ -81,13 +83,13 @@ class DBFieldDecorator {
     }
   }
 
-  static public function merge(db: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, decorators: Array<DBFieldDecorator>){
-    var decorateList   = decorators.map(function(d){ return d.decorate(db,  type, tableName, field); });
+  static public function merge(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, decorators: Array<DBFieldDecorator>){
+    var decorateList   = decorators.map(function(d){ return d.decorate(db_,  type, tableName, field); });
     return{
       extraFieldText  : decorateList.map(function(d){ return d.extraFieldText; }).join(" "),
-      sql_before      : decorateList.map(function(d){ return d.sql_before; }).concatArrays(),
-      sql_after       : decorateList.map(function(d){ return d.sql_after; }).concatArrays(),
-      sql_remove      : decorateList.map(function(d){ return d.sql_remove; }).concatArrays()
+      sql_before      : DBHelper.concatArrays(decorateList.map(function(d){ return d.sql_before; })),
+      sql_after       : DBHelper.concatArrays(decorateList.map(function(d){ return d.sql_after; })),
+      sql_remove      : DBHelper.concatArrays(decorateList.map(function(d){ return d.sql_remove; }))
     }
   }
 
@@ -289,13 +291,13 @@ class DBField implements IDBSerializable {
     return this;
   }
 
-  public function uniq() {
-    this.__uniq = true;
+  public function indexed() {
+    this.__decorators.push(new DBFDIndex(false));
     return this;
   }
 
-  public function indexed(?uniq:Bool) {
-    this.__decorators.push(new DBFDIndex(uniq != null && uniq));
+  public function uniq() {
+    this.__decorators.push(new DBFDIndex(true));
     return this;
   }
 
@@ -449,33 +451,32 @@ class DBField implements IDBSerializable {
           var merged = DBFieldDecorator.merge(db_, new_.type, tableName, new_.name, new_.__decorators);
 
           var references = ( new_.__references == null ) ? "": " REFERENCES " + new_.__references.table + "("+ new_.__references.field + ")";
-          var uniq = new_.__uniq ? " UNIQUE " : "";
           var field:Array<String>;
 
           switch (new_.type){
             case db_varchar(length):
-              field = [alter + new_.name+" varchar("+length+")" + uniq + merged.extraFieldText + references];
+              field = [alter + new_.name+" varchar("+length+")" + merged.extraFieldText + references];
             case db_bool:
-              field = [alter + new_.name+" bool" + uniq + merged.extraFieldText + references];
+              field = [alter + new_.name+" bool" +  merged.extraFieldText + references];
             case db_int:
-              field = [alter + new_.name+" int" + uniq + merged.extraFieldText + references];
+              field = [alter + new_.name+" int" +  merged.extraFieldText + references];
             case db_enum(valid_items):
               var f = function(x){ return "'"+x+"'"; };
               var enumTypeName = tableName+"_"+new_.name;
               return {
-                fields: [alter + new_.name+" "+enumTypeName + " " + uniq + merged.extraFieldText + references],
+                fields: [alter + new_.name+" "+enumTypeName + " " +  merged.extraFieldText + references],
                 fieldNames : [new_.name],
                 sql_before : ["CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(f).join(",")+")"],
                 sql_after : null
               }
             case db_date:
-               field = [alter + new_.name+" timestamp " + uniq + merged.extraFieldText + references];
+               field = [alter + new_.name+" timestamp " +  merged.extraFieldText + references];
 
             case db_text:
-              field = [alter + new_.name+" text" + uniq + merged.extraFieldText + references];
+              field = [alter + new_.name+" text" +  merged.extraFieldText + references];
 
             case db_haxe_enum_simple_as_index(e):
-              field = [alter + new_.name+" int" + uniq + merged.extraFieldText + references];
+              field = [alter + new_.name+" int" +  merged.extraFieldText + references];
           }
 
           return {
