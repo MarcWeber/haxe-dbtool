@@ -113,6 +113,10 @@ Example:
 Usually you want to tweak the update step before running it. Eg you can add
 additionaly HaXe code for whatever reason.
 
+
+ATTENTION: The syntax changed slightly. See comments top of DBTool.hx - and read source :)
+
+
 == RUN TEST SUITE ==
 
 Create a file with these contents:

@@ -18,8 +18,8 @@ using Std;
         new DBField("firstname", db_varchar(50)),
         new DBField("lastname", db_varchar(50)),
         new DBField("last_login", db_date),
-        new DBField("registered", db_date_auto(true, false)),
-        new DBField("changed", db_date_auto(true, true)),
+        new DBField("registered", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()])),
+        new DBField("changed", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()])),
       ]).className("User");
 
     tables.addTable("UserSubscription", [], [
@@ -27,9 +27,17 @@ using Std;
         new DBField("subscriptionTYpe", db_haxe_enum_simple_as_index(SubscriptionType))
     ]);
 
-    // this will create a class with a function scheme1(cnx:..){  /* create all tables or update them * / }
+    // dbTool.prepareUpdate(); create a class with a function
+
+      public function scheme1(cnx:..){
+        /* create all tables or update them * /
+      }
     // modify it so that it fits your needs. Eg adjust scheme updates etc.
-    dbTool.prepareUpdate();
+    // If that already exists the database scheme diff is written to scheme2(cnx:..)
+
+
+    // this executes all schemeNR functions which have not been run on this
+    // database yet:
     dbTool.doUpdate();
 
 */
