@@ -15,11 +15,13 @@ class DBConnection {
 
   public var cnx : neko.db.Connection;
 
+  public var sqlLogger: String -> Void;
+
   public function new(cnx) {
     this.cnx = cnx;
   }
 
-  // new stuff {{{
+  // new stuff 
 
 
   // quotes both: table and field names
@@ -32,7 +34,7 @@ class DBConnection {
 
   // run query quoted by susbtPH
   public function requestPH(query:String, args:Array<Dynamic>){
-    return cnx.request(substPH(query, args));
+    return this.request(substPH(query, args));
   }
 
   // substitute placeholders
@@ -105,11 +107,43 @@ class DBConnection {
     s.add(") VALUES (");
     s.add(values.join(","));
     s.add(")");
-    trace("query is"+s.toString());
 
-    return this.request(s.toString());
+    return request(s.toString());
   }
 
+  public function insertMany(table:String, list:Array<Dynamic>, ?fields: Array<String>){
+    if (list.length == 0) return;
+
+    var names = (fields == null ) ? Reflect.fields(list[0]) : fields;
+
+    var fields = new List();
+    var rows = new List();
+
+    var values = null;
+
+    for( n in names ) {
+      fields.add(this.quoteName(n));
+    }
+
+    for (obj in list){
+      values = new List();
+      for (n in names){
+        values.add(this.quote(Reflect.field(obj,n)));
+      }
+      rows.push(values.join(","));
+    }
+
+    var s = new StringBuf();
+    s.add("INSERT INTO ");
+    s.add(this.quoteName(table));
+    s.add(" (");
+    s.add(fields.join(","));
+    s.add(") VALUES (");
+    s.add(rows.join("),("));
+    s.add(")");
+
+    request(s.toString());
+  }
 
   public function whereANDstr(l:Array<String>){
         return "( (" + l.join(") AND (" ) + ") )";
@@ -145,7 +179,7 @@ class DBConnection {
 
   // cnx.delete("table",{id: "abc"});
   public function delete(table:String, o:Dynamic, ?fields: Array<String>){
-    this.request("DELETE FROM "+this.quoteName(table)+" WHERE "+this.whereANDObj(o, fields) );
+    request("DELETE FROM "+this.quoteName(table)+" WHERE "+this.whereANDObj(o, fields) );
   }
 
   // example usage: cnx.update("users", {name: "A.B"}, null, {id: 10});
@@ -158,14 +192,17 @@ class DBConnection {
       sets.add(this.quoteName(n)+"="+Reflect.field(values,n));
     }
 
-    return this.request("UPDATE "+this.quoteName(table)+" WHERE "+this.whereANDObj(where, whereFields));
+    return request("UPDATE "+this.quoteName(table)+" WHERE "+this.whereANDObj(where, whereFields));
   }
-  // }}}
+  // 
 
 
-  // make connection stuff available {{{
-  public inline function request( s : String ){
-    return cnx.request(s);
+  // make neko.db.Connection stuff available {{{
+  public function request( s : String ){
+    if (sqlLogger != null){
+      sqlLogger(s);
+    }
+    return new DBResultSet(cnx.request(s));
   }
   public inline function close(){
     cnx.close();

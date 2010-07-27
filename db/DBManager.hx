@@ -375,6 +375,7 @@ class DBManager<T : DBObject> {
 		if( c != null )
 			return c;
 		r = cacheObject(r,lock);
+		r.__new = false;
 		make(r);
 		return r;
 	}
@@ -392,6 +393,7 @@ class DBManager<T : DBObject> {
 				make(x);
 				l2.add(x);
 			}
+			x.__new = false;
 		}
 		return l2;
 	}

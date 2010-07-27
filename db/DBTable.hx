@@ -1,6 +1,7 @@
 package db;
 
 using Lambda;
+using HaxeUtil;
 
 // representing a database scheme
 
@@ -11,7 +12,6 @@ enum DBToolFieldType {
   db_enum( valid_items: List<String> );
   db_date;
   db_text; // text field. arbitrary length. Maybe no indexing and slow searching
-  db_date_auto(onInsert: Bool, onUpdate: Bool);
 
   // store ints instead of the named Enum. Provide getter and setters for enum
   // values. Take care when remving or replacing enum values. You have to
@@ -64,6 +64,178 @@ class DBHelper {
   }
 }
 
+class DBFieldDecorator {
+
+  public function decorate(db: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+    extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
+    sql_before: Array<String>,    // eg create postgresql sequence
+    sql_after: Array<String>,     // eg setup trigger
+    sql_remove: Array<String>,         // drop trigger and / or sequence
+  } {
+    throw "abstract method: DBFieldDecorator.decorate";
+    return {
+      extraFieldText: "",
+      sql_before: [],
+      sql_after: [],
+      sql_remove: [],
+    }
+  }
+
+  static public function merge(db: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, decorators: Array<DBFieldDecorator>){
+    var decorateList   = decorators.map(function(d){ return d.decorate(db,  type, tableName, field); });
+    return{
+      extraFieldText  : decorateList.map(function(d){ return d.extraFieldText; }).join(" "),
+      sql_before      : decorateList.map(function(d){ return d.sql_before; }).concatArrays(),
+      sql_after       : decorateList.map(function(d){ return d.sql_after; }).concatArrays(),
+      sql_remove      : decorateList.map(function(d){ return d.sql_remove; }).concatArrays()
+    }
+  }
+
+}
+
+
+class DBFDComment extends DBFieldDecorator {
+  var __comment: String;
+
+  public function new(comment:String) {
+    __comment = comment;
+  }
+
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+    extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
+    sql_before: Array<String>,    // eg create postgresql sequence
+    sql_after: Array<String>,     // eg setup trigger
+    sql_remove: Array<String>,         // drop trigger and / or sequence
+  } {
+    // TODO quoting
+    switch (db_){
+      case db_postgres:
+        return {
+          extraFieldText : "COMMENT \""+__comment+"\"",
+          sql_before : [],
+          sql_after: [],
+          sql_remove: []
+
+        }
+      case db_mysql:
+        return {
+          extraFieldText : "COMMENT \""+__comment+"\"",
+          sql_before : [],
+          sql_after: [],
+          sql_remove: []
+        }
+    }
+  }
+}
+
+
+class DBFDIndex extends DBFieldDecorator {
+  var __uniq: Bool;
+
+  public function new(?uniq:Bool) {
+    __uniq = uniq;
+  }
+
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+    extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
+    sql_before: Array<String>,    // eg create postgresql sequence
+    sql_after: Array<String>,     // eg setup trigger
+    sql_remove: Array<String>,         // drop trigger and / or sequence
+  } {
+    var index_name = "index_"+tableName+"_"+field;
+    switch (db_){
+      case db_postgres:
+        return {
+          extraFieldText : "",
+          sql_before : [],
+          sql_after: ["CREATE "+(__uniq ? "UNIQ" : "" )+" INDEX "+index_name+" "+tableName+"("+field+")"],
+          sql_remove: ["DROP INDEX "+index_name]
+
+        }
+      case db_mysql:
+        return {
+          extraFieldText : "",
+          sql_before : [],
+          sql_after: ["CREATE "+(__uniq ? "UNIQ" : "" )+" "+index_name+" INDEX "+tableName+"("+field+")"],
+          sql_remove: ["DROP INDEX "+index_name]
+        }
+    }
+  }
+}
+
+class DBFDCurrentTimestmap extends DBFieldDecorator {
+  var __onInsert: Bool;
+  var __onUpdate: Bool;
+
+  public function new(){
+  }
+
+  public function onInsert(){
+    __onInsert = true;
+    return this;
+  }
+
+  public function onUpdate(){
+    __onUpdate = true;
+    return this;
+  }
+
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+    extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
+    sql_before: Array<String>,    // eg create postgresql sequence
+    sql_after: Array<String>,     // eg setup trigger
+    sql_remove: Array<String>,         // drop trigger and / or sequence
+  } {
+    if (type != db_date)
+      throw "DBFDCurrentTimestmap only supports db_date fields!";
+
+    switch (db_){
+      case db_postgres:
+        return {
+          extraFieldText : __onInsert ? " default CURRENT_TIMESTAMP " : "",
+          sql_before : [],
+          sql_after: __onUpdate
+                        ? ["
+                          CREATE OR REPLACE FUNCTION update_timestamp_"+tableName+"_"+field+"() RETURNS TRIGGER 
+                          LANGUAGE plpgsql
+                          AS
+                          $$
+                          BEGIN
+                              NEW."+field+" = CURRENT_TIMESTAMP;
+                              RETURN NEW;
+                          END;
+                          $$;
+                        ",
+                        "
+                          CREATE TRIGGER update_timestamp_"+tableName+"_"+field+"_trigger
+                            BEFORE UPDATE
+                            ON "+tableName+"
+                            FOR EACH ROW
+                            EXECUTE PROCEDURE update_timestamp_"+tableName+"_"+field+"();
+                        "
+                        ] : [],
+          sql_remove:
+            __onUpdate
+            ? ["DROP TRIGGER update_timestamp_"+tableName+"_"+field+"_trigger",
+               "DROP FUNCTION update_timestamp_"+tableName+"_"+field]
+            : []
+
+        }
+      case db_mysql:
+        return {
+          extraFieldText : (__onInsert ? " default CURRENT_TIMESTAMP " : "")
+                         + (__onUpdate ? " on update CURRENT_TIMESTAMP " : ""),
+          sql_before : [],
+          sql_after: [],
+          sql_remove: []
+        }
+    }
+      
+  }
+
+}
+
+
 // represents a field
 class DBField implements IDBSerializable {
 
@@ -71,11 +243,12 @@ class DBField implements IDBSerializable {
   public var type: DBToolFieldType;
   public var __references: Null<{table: String, field: String}>;
   public var __autovalue: Null<DBToolFieldAutoValue>;
-  public var nullable: Bool;
+  public var __nullable: Bool;
   public var __uniq: Bool;
   public var __indexed: Bool;
   public var __default: Bool;
   public var __comment: String;
+  public var __decorators: Array<DBFieldDecorator>;
 
   // serialization {{{2
   // create object from serialized string
@@ -90,17 +263,20 @@ class DBField implements IDBSerializable {
   }
   // }}}
 
-  public function new(name: String, type:DBToolFieldType, ?nullable: Bool, ?default_:Dynamic){
+  public function new(name: String, type:DBToolFieldType, ?decorators:Array<DBFieldDecorator>){
     this.name = name;
     this.type = type;
-    this.nullable = nullable == null ? false : nullable;
-    this.__default =  default_;
+    __decorators = decorators == null ? [] : decorators;
     switch (type){
       case db_haxe_enum_simple_as_index(e):
         if (null == Type.resolveEnum(e))
-          throw "envalid enum name "+e+" of field "+name;
+          throw "invalid enum name "+e+" of field "+name;
       default:
     }
+  }
+
+  public function nullable(?nullable:Bool){
+    __nullable = nullable != null && nullable;
   }
 
   public function autovalue(a: Null<DBToolFieldAutoValue>){
@@ -118,8 +294,8 @@ class DBField implements IDBSerializable {
     return this;
   }
 
-  public function indexed() {
-    this.__indexed = true;
+  public function indexed(?uniq:Bool) {
+    this.__decorators.push(new DBFDIndex(uniq != null && uniq));
     return this;
   }
 
@@ -200,17 +376,6 @@ class DBField implements IDBSerializable {
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
         };
-      case db_date_auto(onInsert, onUpdate):
-        // TODO
-        return {
-          dbType: "Date",
-          haxeType: "Date",
-          spodCode:
-            field(name, "String")+
-            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
-            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
-
-        };
       case db_date:
         // TODO
         return{ 
@@ -266,18 +431,12 @@ class DBField implements IDBSerializable {
       new_:Null<DBField>,
       alter:Bool
     )
-    :{ field: Array<String>,
+    :{ fields: Array<String>,
+       fieldNames: Array<String>, // some fields are "virtual", they add multiple database fields. This is a list of all
        sql_before: Null<Array<String>>,
        sql_after: Null<Array<String>>
      }
   {
-
-    var comment = switch (db_){
-      case db_mysql:
-        "";
-      case db_postgres:
-        "";
-    }
 
     switch (db_){
 
@@ -286,66 +445,52 @@ class DBField implements IDBSerializable {
 
         if (old == null){
           // create field
-          var nullable = (new_.nullable) ? "" : " NOT NULL ";
-          var alter = alter ? "ALTER TABLE "+tableName+ " ADD COLUMN " : "";
+
+          var merged = DBFieldDecorator.merge(db_, new_.type, tableName, new_.name, new_.__decorators);
+
           var references = ( new_.__references == null ) ? "": " REFERENCES " + new_.__references.table + "("+ new_.__references.field + ")";
           var uniq = new_.__uniq ? " UNIQUE " : "";
+          var field:Array<String>;
 
           switch (new_.type){
             case db_varchar(length):
-              return { field: [alter + new_.name+" varchar("+length+")" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" varchar("+length+")" + uniq + merged.extraFieldText + references];
             case db_bool:
-              return { field: [alter + new_.name+" bool" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" bool" + uniq + merged.extraFieldText + references];
             case db_int:
-              return { field: [alter + new_.name+" int" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" int" + uniq + merged.extraFieldText + references];
             case db_enum(valid_items):
               var f = function(x){ return "'"+x+"'"; };
               var enumTypeName = tableName+"_"+new_.name;
-              return { field: [alter + new_.name+" "+enumTypeName + " " + uniq + nullable + comment + references],
+              return {
+                fields: [alter + new_.name+" "+enumTypeName + " " + uniq + merged.extraFieldText + references],
+                fieldNames : [new_.name],
                 sql_before : ["CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(f).join(",")+")"],
                 sql_after : null
               }
-            case db_date_auto(onInsert, onUpdate):
-              var ins = onInsert ? " default CURRENT_TIMESTAMP " : "";
-              
-              return { field: [alter + new_.name+" timestamp " + uniq + nullable + ins + comment + references],
-                sql_before : null,
-                sql_after : onUpdate
-                  ? ["
-                    CREATE OR REPLACE FUNCTION update_timestamp_"+tableName+"_"+new_.name+"() RETURNS TRIGGER 
-                    LANGUAGE plpgsql
-                    AS
-                    $$
-                    BEGIN
-                        NEW."+new_.name+" = CURRENT_TIMESTAMP;
-                        RETURN NEW;
-                    END;
-                    $$;
-                  ",
-                  "
-                    CREATE TRIGGER update_timestamp_"+tableName+"_"+new_.name+"_trigger
-                      BEFORE UPDATE
-                      ON "+tableName+"
-                      FOR EACH ROW
-                      EXECUTE PROCEDURE update_timestamp_"+tableName+"_"+new_.name+"();
-                  "
-                  ] : null
-              }
-             case db_date:
-               return { field: [alter + new_.name+" timestamp " + uniq + nullable + comment + references], sql_before : null, sql_after: null }
+            case db_date:
+               field = [alter + new_.name+" timestamp " + uniq + merged.extraFieldText + references];
 
             case db_text:
-              return { field: [alter + new_.name+" text" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" text" + uniq + merged.extraFieldText + references];
 
             case db_haxe_enum_simple_as_index(e):
-              return { field: [alter + new_.name+" int" + uniq + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" int" + uniq + merged.extraFieldText + references];
           }
+
+          return {
+            fields: field,
+            fieldNames: [ new_.name ],
+            sql_before: merged.sql_before,
+            sql_after : merged.sql_after,
+          };
 
         } else if (new_ == null) {
           // drop field
           
+          var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators);
           var res = new Array();
-          res.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
+          merged.sql_remove.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
 
           // only cleanup enum field
           switch (old.type){
@@ -354,18 +499,54 @@ class DBField implements IDBSerializable {
             case db_int:
             case db_date:
             case db_text:
-            case db_date_auto(onInsert, onUpdate):
             case db_haxe_enum_simple_as_index(e):
             case db_enum(valid_items):
-              var enumTypeName = tableName+"_"+new_.name;
+              var enumTypeName = tableName+"_"+old.name;
               var f = function(x){ return "'"+x+"'"; };
-              res.push("CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(f).join(",")+")");
+              merged.sql_after.push("DROP TYPE "+enumTypeName);
           }
-          return { sql_after: res, field: [], sql_before: null };
+          return {
+            sql_after: merged.sql_remove,
+            fields: [],
+            fieldNames: [old.name],
+            sql_before: null
+          };
         } else {
           // change field
-          throw "TODO";
-          return { sql_after: null, field: [], sql_before: null };
+          if (old.name != new_.name)
+            throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
+          
+          var old__create = DBField.toSQL(db_,tableName, null, old, false);
+          var new__create = DBField.toSQL(db_,tableName, null, new_, false);
+
+          var old__drop = DBField.toSQL(db_,tableName, old, null, false);
+          var new__drop = DBField.toSQL(db_,tableName, new_, null, false);
+
+          var setup_differ = (old__create.sql_after != new__create.sql_after)
+                          || (old__create.sql_before != new__create.sql_before);
+
+          var changeFields = new Array<String>();
+          if (old__create.fields.length == new__create.fields.length){
+            for (i in 0 ... old__create.fields.length){
+              var n = old__create.fieldNames[i];
+              changeFields.push("ALTER TABLE "+tableName+" CHANGE "+n+" "+n+" "+new__create.fields[i]);
+            }
+          } else {
+            // drop old
+            for (o in old__create.fields)
+              changeFields.push("ALTER TABLE "+tableName+" DROP "+o);
+            // create new
+            for (n in new__create.fields)
+              changeFields.push("ALTER TABLE "+tableName+" ADD "+n);
+          }
+
+          return {
+            sql_before: (setup_differ ? new__create.sql_before : [])
+                .concat(changeFields),
+            sql_after: setup_differ ? old__drop.sql_after.concat(new__create.sql_after) : [],
+            fields: [],
+            fieldNames: []
+          };
         }
 
 
@@ -374,44 +555,103 @@ class DBField implements IDBSerializable {
 
         if (old == null){
           // create field
-          var nullable = (new_.nullable) ? "" : " NOT NULL ";
-          var alter = alter ? "ALTER TABLE "+tableName+ " ADD " : "";
+
+          var merged = DBFieldDecorator.merge(db_, new_.type, tableName, new_.name, new_.__decorators);
+          var nullable = (new_.__nullable) ? "" : " NOT NULL ";
           var references = ( new_.__references == null ) ? "": " REFERENCES " + new_.__references.table + "("+ new_.__references.field + ")";
+          var field:Array<String>;
           switch (new_.type){
             case db_varchar(length):
-              return { field: [alter + new_.name+" varchar("+length+")" + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [new_.name+" varchar("+length+")" + nullable + merged.extraFieldText + references];
             case db_bool:
-              return {  field: [alter + new_.name+" enum('y','n')" + nullable + comment + references], sql_before : null, sql_after : null }
+               field = [new_.name+" enum('y','n')"];
             case db_int:
-              return { field: [alter + new_.name+" int" + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [new_.name+" int" + nullable + merged.extraFieldText + references];
             case db_enum(valid_items):
               var f = function(x){ return "'"+x+"'"; };
-              return { field: [alter + new_.name+" enum("+ valid_items.map(f).join(",") +")" + nullable + comment + references], sql_before : null, sql_after : null }
+              return {
+                fields: [new_.name+" enum("+ valid_items.map(f).join(",") +")" + nullable + merged.extraFieldText + references],
+                fieldNames : [ new_.name ],
+                sql_before : null,
+                sql_after : null
+              }
 
             case db_date:
               throw "TODO";
               // return { field: nalter + ew_.name+" time" + nullable + comment + references, sql_before : null, sql_after : null }
 
             case db_text:
-              return { field: [alter + new_.name+" longtext" + nullable + comment + references], sql_before : null, sql_after : null }
-            case db_date_auto(onInsert, onUpdate):
-              throw "TODO";
-              var ins = onInsert ? " default CURRENT_TIMESTAMP " : "";
-              var up = onInsert ? " on update CURRENT_TIMESTAMP " : "";
-              return { field: [alter + new_.name+" timestamp " + nullable + ins + up], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" longtext" + nullable + merged.extraFieldText + references];
             case db_haxe_enum_simple_as_index(e):
-              return { field: [alter + new_.name+" int" + nullable + comment + references], sql_before : null, sql_after : null }
+              field = [alter + new_.name+" int" + nullable + merged.extraFieldText + references];
           }
+
+          return {
+            fields: field,
+            fieldNames: [ new_.name ],
+            sql_before : merged.sql_before,
+            sql_after  : merged.sql_after,
+          };
         } else if (new_ == null) {
           // drop field
-          DBHelper.assert(alter, "alter should have been set to true");
+          var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators);
           var res = new Array();
-          res.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
+          merged.sql_remove.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
 
-          return { sql_after: res, field: [], sql_before: null };
+          // only cleanup enum field
+          switch (old.type){
+            case db_varchar(length):
+            case db_bool:
+            case db_int:
+            case db_date:
+            case db_text:
+            case db_haxe_enum_simple_as_index(e):
+            case db_enum(valid_items):
+          }
+          return {
+            sql_after: merged.sql_remove,
+            fields: [],
+            fieldNames: [old.name],
+            sql_before: null
+          };
+
+
         } else {
           // change field
-          throw "TODO";
+          if (old.name != new_.name)
+            throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
+          
+          var old__create = DBField.toSQL(db_,tableName, null, old, false);
+          var new__create = DBField.toSQL(db_,tableName, null, new_, false);
+
+          var old__drop = DBField.toSQL(db_,tableName, old, null, false);
+          var new__drop = DBField.toSQL(db_,tableName, new_, null, false);
+
+          var setup_differ = (old__create.sql_after != new__create.sql_after)
+                          || (old__create.sql_before != new__create.sql_before);
+
+          var changeFields = new Array<String>();
+          if (old__create.fields.length == new__create.fields.length){
+            for (i in 0 ... old__create.fields.length){
+              var n = old__create.fieldNames[i];
+              changeFields.push("ALTER TABLE "+tableName+" CHANGE "+n+" "+n+" "+new__create.fields[i]);
+            }
+          } else {
+            // drop old
+            for (o in old__create.fields)
+              changeFields.push("ALTER TABLE "+tableName+" DROP "+o);
+            // create new
+            for (n in new__create.fields)
+              changeFields.push("ALTER TABLE "+tableName+" ADD "+n);
+          }
+
+          return {
+            sql_before: (setup_differ ? new__create.sql_before : [])
+                .concat(changeFields),
+            sql_after: setup_differ ? old__drop.sql_after.concat(new__create.sql_after) : [],
+            fields: [],
+            fieldNames: []
+          };
         }
 
     } // }}}
@@ -471,7 +711,7 @@ class DBTable implements IDBSerializable {
     var pushAll = function(r){
       if (r.sql_before != null)
         requests = requests.concat(r.sql_before);
-      requests = requests.concat(r.field);
+      // requests = requests.concat(r.fields);
       if (r.sql_after != null)
         requests = requests.concat(r.sql_after);
     }
@@ -483,7 +723,7 @@ class DBTable implements IDBSerializable {
         
         if (old == null) {
           // create table
-            trace("creating sql for table "+new_.name);
+            //trace("creating sql for table "+new_.name);
 
             var after = new Array();
             var before = new Array();
@@ -494,7 +734,7 @@ class DBTable implements IDBSerializable {
                   before = before.concat(r.sql_before);
                 if (r.sql_after != null)
                   after = after.concat(r.sql_after);
-                return r.field.join(",\n");
+                return r.fields.join(",\n");
             }).join("\n,");
 
             requests = requests.concat(before);

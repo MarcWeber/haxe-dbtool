@@ -1,7 +1,7 @@
 package db;
 
-import db.DBTable;
 import neko.db.Connection;
+import db.DBTable;
 
 using StringTools;
 using Lambda;
@@ -33,6 +33,7 @@ using Std;
     dbTool.doUpdate();
 
 */
+
 
 
 class DBTool {
@@ -103,7 +104,7 @@ class DBTool {
 
   function updateSPODS(db_:DBSupportedDatabaseType, up){
     for (t in data.tables){
-      trace("testing " + t.name);
+     // trace("testing " + t.name);
       if (t.name == db_version_table || !t.__createSPODClass)
         continue;
       // keep it simple for now. Can be enhanced later
@@ -396,7 +397,7 @@ class DBTool {
   }
 
   function info(msg:Dynamic) {
-    trace(msg);
+    //trace(msg);
   }
   // }}}
 
