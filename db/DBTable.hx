@@ -424,6 +424,96 @@ class DBField implements IDBSerializable {
 
   }
 
+  static public function fieldCode(
+      db_: DBSupportedDatabaseType,
+      tableName: String,
+      f: DBField):{
+        fields: Array<String>,
+        fieldNames: Array<String>,
+        sql_before: Array<String>,
+        sql_after : Array<String>,
+        sql_remove : Array<String>
+    }{
+
+    switch (db_){
+      case db_postgres: // {{{
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators);
+
+        var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
+        var field:Array<String>;
+
+        switch (f.type){
+          case db_varchar(length):
+            field = [f.name+" varchar("+length+")" + merged.extraFieldText + references];
+          case db_bool:
+            field = [f.name+" bool" +  merged.extraFieldText + references];
+          case db_int:
+            field = [f.name+" int" +  merged.extraFieldText + references];
+          case db_enum(valid_items):
+            var fun = function(x){ return "'"+x+"'"; };
+            var enumTypeName = tableName+"_"+f.name;
+            field = [f.name+" "+enumTypeName + " " +  merged.extraFieldText + references];
+            merged.sql_before.push("CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(fun).join(",")+")");
+          case db_date:
+             field = [f.name+" timestamp " +  merged.extraFieldText + references];
+
+          case db_text:
+            field = [f.name+" text" +  merged.extraFieldText + references];
+
+          case db_haxe_enum_simple_as_index(e):
+            field = [f.name+" int" +  merged.extraFieldText + references];
+            var enumTypeName = tableName+"_"+f.name;
+            var f = function(x){ return "'"+x+"'"; };
+            merged.sql_remove.push("DROP TYPE "+enumTypeName);
+        }
+
+        return {
+          fields: field,
+          fieldNames: [ f.name ],
+          sql_before: merged.sql_before,
+          sql_after : merged.sql_after,
+          sql_remove : merged.sql_remove
+        };
+      // }}}
+      case db_mysql: // {{{
+
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators);
+        var nullable = (f.__nullable) ? "" : " NOT NULL ";
+        var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
+        var field:Array<String>;
+        switch (f.type){
+          case db_varchar(length):
+            field = [f.name+" varchar("+length+")" + nullable + merged.extraFieldText + references];
+          case db_bool:
+             field = [f.name+" enum('y','n')"];
+          case db_int:
+            field = [f.name+" int" + nullable + merged.extraFieldText + references];
+          case db_enum(valid_items):
+            var fun = function(x){ return "'"+x+"'"; };
+            field = [f.name+" enum("+ valid_items.map(fun).join(",") +")" + nullable + merged.extraFieldText + references];
+          case db_date:
+            throw "TODO";
+            // return { field: nalter + ew_.name+" time" + nullable + comment + references, sql_before : null, sql_after : null }
+
+          case db_text:
+            field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
+          case db_haxe_enum_simple_as_index(e):
+            field = [f.name+" int" + nullable + merged.extraFieldText + references];
+        }
+
+        return {
+          fields: field,
+          fieldNames: [ f.name ],
+          sql_before : merged.sql_before,
+          sql_after  : merged.sql_after,
+          sql_remove : merged.sql_remove
+        };
+      // }}}
+    }
+
+  }
+
+
   // returns message if type can't be represented in a dabatase
   // sql_before : ""; sql_after may be required to satisfy constraints or do more (?) not implemented yet. Maybe removed again
   static public function toSQL(
@@ -440,222 +530,62 @@ class DBField implements IDBSerializable {
      }
   {
 
-    switch (db_){
+    if (old == null){
+      // create field
 
-      // Postgres case {{{2
-      case db_postgres:
+      var r = DBField.fieldCode(db_, tableName, new_);
+      r.sql_remove = [];
+      return r;
 
-        if (old == null){
-          // create field
+    } else if (new_ == null) {
+      // drop field
+      
+      var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators);
+      var res = new Array();
+      merged.sql_remove.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
 
-          var merged = DBFieldDecorator.merge(db_, new_.type, tableName, new_.name, new_.__decorators);
+      return {
+        sql_after: merged.sql_remove,
+        fields: [],
+        fieldNames: [old.name],
+        sql_before: null
+      };
 
-          var references = ( new_.__references == null ) ? "": " REFERENCES " + new_.__references.table + "("+ new_.__references.field + ")";
-          var field:Array<String>;
+    } else {
+      // change field
+      if (old.name != new_.name)
+        throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
+      
+      var old__code = DBField.fieldCode(db_,tableName, old);
+      var new__code = DBField.fieldCode(db_,tableName, new_);
 
-          switch (new_.type){
-            case db_varchar(length):
-              field = [alter + new_.name+" varchar("+length+")" + merged.extraFieldText + references];
-            case db_bool:
-              field = [alter + new_.name+" bool" +  merged.extraFieldText + references];
-            case db_int:
-              field = [alter + new_.name+" int" +  merged.extraFieldText + references];
-            case db_enum(valid_items):
-              var f = function(x){ return "'"+x+"'"; };
-              var enumTypeName = tableName+"_"+new_.name;
-              return {
-                fields: [alter + new_.name+" "+enumTypeName + " " +  merged.extraFieldText + references],
-                fieldNames : [new_.name],
-                sql_before : ["CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(f).join(",")+")"],
-                sql_after : null
-              }
-            case db_date:
-               field = [alter + new_.name+" timestamp " +  merged.extraFieldText + references];
+      var setup_differ = (old__code.sql_after != new__code.sql_after)
+                      || (old__code.sql_before != new__code.sql_before);
 
-            case db_text:
-              field = [alter + new_.name+" text" +  merged.extraFieldText + references];
-
-            case db_haxe_enum_simple_as_index(e):
-              field = [alter + new_.name+" int" +  merged.extraFieldText + references];
-          }
-
-          return {
-            fields: field,
-            fieldNames: [ new_.name ],
-            sql_before: merged.sql_before,
-            sql_after : merged.sql_after,
-          };
-
-        } else if (new_ == null) {
-          // drop field
-          
-          var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators);
-          var res = new Array();
-          merged.sql_remove.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
-
-          // only cleanup enum field
-          switch (old.type){
-            case db_varchar(length):
-            case db_bool:
-            case db_int:
-            case db_date:
-            case db_text:
-            case db_haxe_enum_simple_as_index(e):
-            case db_enum(valid_items):
-              var enumTypeName = tableName+"_"+old.name;
-              var f = function(x){ return "'"+x+"'"; };
-              merged.sql_after.push("DROP TYPE "+enumTypeName);
-          }
-          return {
-            sql_after: merged.sql_remove,
-            fields: [],
-            fieldNames: [old.name],
-            sql_before: null
-          };
-        } else {
-          // change field
-          if (old.name != new_.name)
-            throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
-          
-          var old__create = DBField.toSQL(db_,tableName, null, old, false);
-          var new__create = DBField.toSQL(db_,tableName, null, new_, false);
-
-          var old__drop = DBField.toSQL(db_,tableName, old, null, false);
-          var new__drop = DBField.toSQL(db_,tableName, new_, null, false);
-
-          var setup_differ = (old__create.sql_after != new__create.sql_after)
-                          || (old__create.sql_before != new__create.sql_before);
-
-          var changeFields = new Array<String>();
-          if (old__create.fields.length == new__create.fields.length){
-            for (i in 0 ... old__create.fields.length){
-              var n = old__create.fieldNames[i];
-              changeFields.push("ALTER TABLE "+tableName+" CHANGE "+n+" "+n+" "+new__create.fields[i]);
-            }
-          } else {
-            // drop old
-            for (o in old__create.fields)
-              changeFields.push("ALTER TABLE "+tableName+" DROP "+o);
-            // create new
-            for (n in new__create.fields)
-              changeFields.push("ALTER TABLE "+tableName+" ADD "+n);
-          }
-
-          return {
-            sql_before: (setup_differ ? new__create.sql_before : [])
-                .concat(changeFields),
-            sql_after: setup_differ ? old__drop.sql_after.concat(new__create.sql_after) : [],
-            fields: [],
-            fieldNames: []
-          };
+      var changeFields = new Array<String>();
+      if (old__code.fields.length == new__code.fields.length){
+        for (i in 0 ... old__code.fields.length){
+          var n = old__code.fieldNames[i];
+          if (old__code.fields[i] != new__code.fields[i])
+            changeFields.push("ALTER TABLE "+tableName+" CHANGE "+n+" "+new__code.fields[i]);
         }
+      } else {
+        // drop old
+        for (o in old__code.fields)
+          changeFields.push("ALTER TABLE "+tableName+" DROP "+o);
+        // create new
+        for (n in new__code.fields)
+          changeFields.push("ALTER TABLE "+tableName+" ADD "+n);
+      }
 
-
-      // MySQL case {{{2
-      case db_mysql:
-
-        if (old == null){
-          // create field
-
-          var merged = DBFieldDecorator.merge(db_, new_.type, tableName, new_.name, new_.__decorators);
-          var nullable = (new_.__nullable) ? "" : " NOT NULL ";
-          var references = ( new_.__references == null ) ? "": " REFERENCES " + new_.__references.table + "("+ new_.__references.field + ")";
-          var field:Array<String>;
-          switch (new_.type){
-            case db_varchar(length):
-              field = [new_.name+" varchar("+length+")" + nullable + merged.extraFieldText + references];
-            case db_bool:
-               field = [new_.name+" enum('y','n')"];
-            case db_int:
-              field = [new_.name+" int" + nullable + merged.extraFieldText + references];
-            case db_enum(valid_items):
-              var f = function(x){ return "'"+x+"'"; };
-              return {
-                fields: [new_.name+" enum("+ valid_items.map(f).join(",") +")" + nullable + merged.extraFieldText + references],
-                fieldNames : [ new_.name ],
-                sql_before : null,
-                sql_after : null
-              }
-
-            case db_date:
-              throw "TODO";
-              // return { field: nalter + ew_.name+" time" + nullable + comment + references, sql_before : null, sql_after : null }
-
-            case db_text:
-              field = [alter + new_.name+" longtext" + nullable + merged.extraFieldText + references];
-            case db_haxe_enum_simple_as_index(e):
-              field = [alter + new_.name+" int" + nullable + merged.extraFieldText + references];
-          }
-
-          return {
-            fields: field,
-            fieldNames: [ new_.name ],
-            sql_before : merged.sql_before,
-            sql_after  : merged.sql_after,
-          };
-        } else if (new_ == null) {
-          // drop field
-          var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators);
-          var res = new Array();
-          merged.sql_remove.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
-
-          // only cleanup enum field
-          switch (old.type){
-            case db_varchar(length):
-            case db_bool:
-            case db_int:
-            case db_date:
-            case db_text:
-            case db_haxe_enum_simple_as_index(e):
-            case db_enum(valid_items):
-          }
-          return {
-            sql_after: merged.sql_remove,
-            fields: [],
-            fieldNames: [old.name],
-            sql_before: null
-          };
-
-
-        } else {
-          // change field
-          if (old.name != new_.name)
-            throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
-          
-          var old__create = DBField.toSQL(db_,tableName, null, old, false);
-          var new__create = DBField.toSQL(db_,tableName, null, new_, false);
-
-          var old__drop = DBField.toSQL(db_,tableName, old, null, false);
-          var new__drop = DBField.toSQL(db_,tableName, new_, null, false);
-
-          var setup_differ = (old__create.sql_after != new__create.sql_after)
-                          || (old__create.sql_before != new__create.sql_before);
-
-          var changeFields = new Array<String>();
-          if (old__create.fields.length == new__create.fields.length){
-            for (i in 0 ... old__create.fields.length){
-              var n = old__create.fieldNames[i];
-              changeFields.push("ALTER TABLE "+tableName+" CHANGE "+n+" "+n+" "+new__create.fields[i]);
-            }
-          } else {
-            // drop old
-            for (o in old__create.fields)
-              changeFields.push("ALTER TABLE "+tableName+" DROP "+o);
-            // create new
-            for (n in new__create.fields)
-              changeFields.push("ALTER TABLE "+tableName+" ADD "+n);
-          }
-
-          return {
-            sql_before: (setup_differ ? new__create.sql_before : [])
-                .concat(changeFields),
-            sql_after: setup_differ ? old__drop.sql_after.concat(new__create.sql_after) : [],
-            fields: [],
-            fieldNames: []
-          };
-        }
-
-    } // }}}
+      return {
+        sql_before: (setup_differ ? new__code.sql_before : [])
+            .concat(changeFields),
+        sql_after: setup_differ ? old__code.sql_remove.concat(new__code.sql_after) : [],
+        fields: [],
+        fieldNames: []
+      };
+    }
       
   }
   
@@ -766,7 +696,7 @@ class DBTable implements IDBSerializable {
                         , new_ == null ? new Array() : new_.fields );
 
           for (n in changeSets.n){ pushAll(DBField.toSQL(db_, new_.name, null, n, true)); }
-          for (k in changeSets.o){ pushAll(DBField.toSQL(db_, new_.name, k.o, k.n, true)); }
+          for (k in changeSets.k){ pushAll(DBField.toSQL(db_, new_.name, k.o, k.n, true)); }
           for (o in changeSets.o){ pushAll(DBField.toSQL(db_, new_.name, o, null, true)); }
 
           if (old.primaryKeys != new_.primaryKeys){

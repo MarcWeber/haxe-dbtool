@@ -233,7 +233,7 @@ class DBTool {
     for (on in changeSets.k)
       requests = requests.concat( DBTable.toSQL(dbType, on.o, on.n) );
     for (new_ in changeSets.n){
-      requests = requests.concat(DBTable.toSQL(dbType, null, new_));
+      requests = requests.concat( DBTable.toSQL(dbType, null, new_));
     }
     if (requests.length == 0){
       info("nothing to be updated, returning");
