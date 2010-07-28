@@ -50,6 +50,7 @@ class DBTool {
 
   public var db_: neko.db.Connection;
   public var dbType: DBSupportedDatabaseType;
+  public var imports: Array<String>;
   public var data: {
     tables: Array<DBTable>
   };
@@ -70,9 +71,12 @@ class DBTool {
   {
     this.db_version_table = "db_version";
     this.db_ = conn;             // connection to operate on and to create queries for
-    this.dbType = switch (this.db_.dbName()){
+    var dbName = this.db_.dbName();
+    this.dbType = switch (dbName){
       case "PostgreSQL": db_postgres;
-      case "Mysql": db_mysql;
+      case "MySQL": db_mysql;
+      default:
+        throw "can't match "+dbName+" against neither: PostgreSQL, MySQL";
     }
     this.updateObjectFQN = updateObjectFQN; // versioned .sql files are placed here. Before they are executed you can tweak them (allow running code?)
     this.data = {
@@ -85,6 +89,12 @@ class DBTool {
         new DBField("hash_of_serialized_scheme", db_varchar(32))
       ]);
     this.spodPackage = spodPackage;
+    this.imports = [ "db.DBTable", "db.DBObject", "db.DBManager" ];
+  }
+
+  public function addImports(imports:Array<String>){
+    this.imports = this.imports.concat(imports);
+    return this;
   }
 
   // implementation {{{1
@@ -168,8 +178,12 @@ class DBTool {
 
       if (!neko.FileSystem.exists(file)){
         lines.push("package "+spodPackage.pkg+";");
+        for (im in imports)
+          lines.push("import "+im+";");
         lines.push("// import ..");
-        lines.push("class "+t.__SPODClassName+" extends neko.db.Object {");
+
+        lines.push("");
+        lines.push("class "+t.__SPODClassName+" extends db.DBObject {");
 
         lines = lines.concat(generatedCode);
         lines.push("   public static var manager = new db.DBManager<"+t.__SPODClassName+">("+t.__SPODClassName+");");

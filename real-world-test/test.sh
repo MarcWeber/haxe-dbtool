@@ -9,6 +9,10 @@
 
 set -e
 
+if [ "$1" == "-d" ]; then
+  set -x
+fi
+
 db=haxe_db_tool_test_database
 
 rm -fr generated-src php || true
@@ -33,7 +37,11 @@ RUN(){
 
   case "$target" in
     php)
-      php php/Test.php "$@" &> log.txt
+      php php/Test.php "$@" &> log.txt || {
+        echo "php exited nonzero ?"
+        cat log.txt
+        exit 1
+      }
       if grep \#1 log.txt &> /dev/null; then
         echo "exception running Test"
         cat log.txt

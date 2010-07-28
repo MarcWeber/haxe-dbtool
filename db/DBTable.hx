@@ -64,7 +64,7 @@ class DBHelper {
 
 class DBFieldDecorator {
 
-  public function decorate(db: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+  public function decorate(db: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -79,8 +79,8 @@ class DBFieldDecorator {
     }
   }
 
-  static public function merge(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, decorators: Array<DBFieldDecorator>){
-    var decorateList   = decorators.map(function(d){ return d.decorate(db_,  type, tableName, field); });
+  static public function merge(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, decorators: Array<DBFieldDecorator>, droppingTable:Bool){
+    var decorateList   = decorators.map(function(d){ return d.decorate(db_,  type, tableName, field, droppingTable); });
     return{
       extraFieldText  : decorateList.map(function(d){ return d.extraFieldText; }).join(" "),
       sql_before      : DBHelper.concatArrays(decorateList.map(function(d){ return d.sql_before; })),
@@ -99,7 +99,7 @@ class DBFDComment extends DBFieldDecorator {
     __comment = comment;
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -134,7 +134,7 @@ class DBFDIndex extends DBFieldDecorator {
     __uniq = uniq;
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -147,15 +147,15 @@ class DBFDIndex extends DBFieldDecorator {
           extraFieldText : "",
           sql_before : [],
           sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
-          sql_remove: ["DROP INDEX "+index_name]
+          sql_remove: droppingTable ? [] : ["ALTER TABLE "+tableName+" DROP INDEX "+index_name]
 
         }
       case db_mysql:
         return {
           extraFieldText : "",
           sql_before : [],
-          sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" "+index_name+" INDEX "+tableName+"("+field+")"],
-          sql_remove: ["DROP INDEX "+index_name]
+          sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
+          sql_remove: droppingTable ? [] : ["ALTER TABLE "+tableName+" DROP INDEX "+index_name]
         }
     }
   }
@@ -167,7 +167,7 @@ class DBFDAutoinc extends DBFieldDecorator {
   public function new() {
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -188,7 +188,7 @@ class DBFDAutoinc extends DBFieldDecorator {
         }
       case db_mysql:
         return {
-          extraFieldText : " autoinc ",
+          extraFieldText : " auto_increment key ",
           sql_before : [],
           sql_after: [],
           sql_remove: []
@@ -203,6 +203,12 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
   var __onInsert: Bool;
   var __onUpdate: Bool;
 
+  // TODO implement this for MySQL. See comments in 
+  // must use triggers for MySQL when using more than one column which should be updated.
+  // However they are likely to cause problems
+  // because you need root priviledges in order to set them up on hosting systems
+  var __forcTriggers: Bool;
+
   public function new(){
   }
 
@@ -216,7 +222,7 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
     return this;
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable:Bool):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -280,11 +286,17 @@ class DBField implements IDBSerializable {
   public var __references: Null<{table: String, field: String}>;
   public var __nullable: Bool;
 
+
+  public function decoratorsOftype(c:Class<Dynamic>):List<DBFieldDecorator>{
+    return __decorators.filter(function(x){ return Std.is(x, c); });
+  }
+
   // property __uniq {{{1
   // if this field is the only primary key its uniq as well - but this can only be known in the table
   public var __uniq(get__uniq, null) : Bool;
   private function get__uniq(): Bool {
-    return __decorators.filter(function(x){ return Std.is(x, DBFDIndex) && cast(x, DBFDIndex).__uniq; }).length > 0;
+    var l = decoratorsOftype(DBFDIndex).first();
+    return l != null && cast(l,DBFDIndex).__uniq;
   }
   // }}}
   
@@ -319,6 +331,7 @@ class DBField implements IDBSerializable {
 
   public function nullable(){
     __nullable = true;
+    return this;
   }
 
   public function references(table: String, field:String) {
@@ -461,7 +474,9 @@ class DBField implements IDBSerializable {
   static public function fieldCode(
       db_: DBSupportedDatabaseType,
       tableName: String,
-      f: DBField):{
+      f: DBField,
+      droppingTable:Bool
+      ):{
         fields: Array<String>,     // fields to be inserted into a CREATE TABLE or ALTER TABLE XY CHANGE statement
         alter: Array<String>,       // string after ALTER TABLE xy ..
                                    // for mysql this is CHANGE ..
@@ -474,7 +489,7 @@ class DBField implements IDBSerializable {
 
     switch (db_){
       case db_postgres: // {{{
-        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators);
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable);
         var nullable = (f.__nullable) ? "" : " NOT NULL ";
 
         var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
@@ -517,6 +532,7 @@ class DBField implements IDBSerializable {
 
         return {
           fields: field,
+          // Postgresql has different syntax for changing the field type
           alter:  [ [a+"TYPE "+type, a+(f.__nullable ? "DROP NOT NULL" : "SET NOT NULL")].join(", ") ],
           fieldNames: [ f.name ],
           sql_before: merged.sql_before,
@@ -526,7 +542,7 @@ class DBField implements IDBSerializable {
       // }}}
       case db_mysql: // {{{
 
-        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators);
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable);
         var nullable = (f.__nullable) ? "" : " NOT NULL ";
         var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
         var field:Array<String>;
@@ -541,9 +557,7 @@ class DBField implements IDBSerializable {
             var fun = function(x){ return "'"+x+"'"; };
             field = [f.name+" enum("+ valid_items.map(fun).join(",") +")" + nullable + merged.extraFieldText + references];
           case db_date:
-            throw "TODO";
-            // return { field: nalter + ew_.name+" time" + nullable + comment + references, sql_before : null, sql_after : null }
-
+            field = [f.name+" timestamp " + nullable + merged.extraFieldText + references];
           case db_text:
             field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
           case db_haxe_enum_simple_as_index(e):
@@ -552,7 +566,7 @@ class DBField implements IDBSerializable {
 
         return {
           fields: field,
-          alter: ["CHANGE "+f.name+" "+f.name+" "+field],
+          alter: field.map(function(fx){ return "CHANGE "+f.name+" "+fx; }).array(),
           fieldNames: [ f.name ],
           sql_before : merged.sql_before,
           sql_after  : merged.sql_after,
@@ -571,34 +585,62 @@ class DBField implements IDBSerializable {
       tableName: String,
       old: Null<DBField>,
       new_:Null<DBField>,
-      alter:Bool
+      droppingTable:Bool
     )
     :{ fields: Array<String>,
        fieldNames: Array<String>, // some fields are "virtual", they add multiple database fields. This is a list of all
-       sql_before: Null<Array<String>>,
-       sql_after: Null<Array<String>>
+       sql_before: Null<Array<String>>, // SQL required for setup (eg this creates triggers, sequences etc)
+       sql_after: Null<Array<String>>,  // same but run after the step (this removes triggeres, sequences, eg after field change)
+       sql_drop_fields: Array<String>,   // drop fields. This has to be ignored when the table is dropped.
+       sql_create_fields: Array<String> // SQL adding fields to an (existing) table
      }
   {
 
     if (old == null){
       // create field
 
-      var r = DBField.fieldCode(db_, tableName, new_);
+      var r = DBField.fieldCode(db_, tableName, new_, droppingTable);
       r.sql_remove = [];
-      return r;
+
+      var createFields = new Array();
+      for (o in r.fields)
+        createFields.push("ALTER TABLE "+tableName+" ADD "+o);
+
+      return {
+
+        fields: r.fields,
+        fieldNames: r.fieldNames,
+        sql_before: r.sql_before, 
+        sql_after: r.sql_after,
+        sql_create_fields: createFields,
+        sql_drop_fields: []
+
+      }
 
     } else if (new_ == null) {
       // drop field
       
-      var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators);
+      var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators, droppingTable);
+      var r = DBField.fieldCode(db_, tableName, old, droppingTable);
       var res = new Array();
-      merged.sql_remove.push("ALTER TABLE "+tableName+" DROP FIELD "+old.name);
+      var drop_fields;
+
+      switch (db_){
+        case db_mysql:
+          drop_fields = ["ALTER TABLE "+tableName+" DROP "+old.name];
+        case db_postgres:
+          drop_fields = ["ALTER TABLE "+tableName+" DROP FIELD "+old.name];
+        default:
+          throw "not implemented yet";
+      }
 
       return {
         sql_after: merged.sql_remove,
         fields: [],
-        fieldNames: [old.name],
-        sql_before: null
+        fieldNames: r.fieldNames,
+        sql_before: null,
+        sql_drop_fields: drop_fields,
+        sql_create_fields: []
       };
 
     } else {
@@ -606,8 +648,8 @@ class DBField implements IDBSerializable {
       if (old.name != new_.name)
         throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
       
-      var old__code = DBField.fieldCode(db_,tableName, old);
-      var new__code = DBField.fieldCode(db_,tableName, new_);
+      var old__code = DBField.fieldCode(db_,tableName, old, droppingTable);
+      var new__code = DBField.fieldCode(db_,tableName, new_, droppingTable);
 
       var setup_differ = (old__code.sql_after != new__code.sql_after)
                       || (old__code.sql_before != new__code.sql_before);
@@ -633,7 +675,9 @@ class DBField implements IDBSerializable {
             .concat(changeFields),
         sql_after: setup_differ ? old__code.sql_remove.concat(new__code.sql_after) : [],
         fields: [],
-        fieldNames: []
+        sql_drop_fields: [],
+        fieldNames: [],
+        sql_create_fields: []
       };
     }
       
@@ -669,6 +713,18 @@ class DBTable implements IDBSerializable {
     return this;
   }
 
+  // property __autoinc {{{1
+  public function autoincField():Null<DBField>{
+    var list = DBHelper.concatArrays(fields.map(function(f){ return f.decoratorsOftype(DBFDAutoinc).length > 0 ? [f] : []; }));
+    if (list.length > 1)
+      throw "there cane be only one autoinc fiedl, found in table "+name+" : "+list.map(function(f){ return f.name; }).join(", ");
+    else if (list.length == 1)
+      return list[0];
+    else
+      return null;
+  }
+  // }}}
+
   // serialization {{{2
   // create object from serialized string
   public function toString() {
@@ -689,15 +745,68 @@ class DBTable implements IDBSerializable {
     var sqls = new List();
 
     var requests = new Array();
-    var pushAll = function(r){
+    var pushAll = function(pushCreateFields, r){
       if (r.sql_before != null)
         requests = requests.concat(r.sql_before);
-      // requests = requests.concat(r.fields);
+      if (pushCreateFields)
+        requests = requests.concat(r.sql_create_fields);
       if (r.sql_after != null)
         requests = requests.concat(r.sql_after);
+      requests = requests.concat(r.sql_drop_fields);
+    }
+    var mysql_primary_included = function(x:DBTable){
+      var autoInc = x.autoincField();
+
+      if (autoInc != null) {
+        if ( x.primaryKeys.length != 1 )
+          throw "both declared: if autoinc is used the table must have one primary key!";
+
+        if ( autoInc.name != x.primaryKeys[0])
+          throw "both declared: autoinc field and differing primary key! This doesn't work for MySQL";
+        return true;
+      }
+      return false;
+    }
+
+    var create_table = function(){
+      var after = new Array();
+      var before = new Array();
+
+      var fields = new_.fields.map(function(f){
+          var r = DBField.toSQL(db_, new_.name, null, f, false);
+          if (r.sql_before != null)
+            before = before.concat(r.sql_before);
+          if (r.sql_after != null)
+            after = after.concat(r.sql_after);
+          return r.fields.join(",\n");
+      }).join("\n,");
+
+      var primary_key = (new_.primaryKeys.length > 0 ? ", PRIMARY KEY ("+ new_.primaryKeys.join(", ")+") \n" : "" );
+
+      if (mysql_primary_included(new_))
+        primary_key = ""; // primary key is set by DBFDAutoinc
+
+      requests = requests.concat(before);
+      requests.push(
+        "CREATE TABLE "+new_.name+ "(\n"
+        + fields +"\n"
+        + primary_key
+        +");\n");
+      requests = requests.concat(after);
+    }
+
+    var drop_table = function(){
+      requests.push( "DROP TABLE "+old.name+ ";" );
+      // possible cleanups (remove enum types ?)
+      for (f in old.fields){
+        var r = DBField.toSQL(db_, old.name, f, null, true);
+        if (r.sql_after != null)
+          requests = requests.concat(r.sql_after);
+      }
     }
 
     switch (db_){
+
 
       // Postgres case {{{2
       case db_postgres:
@@ -706,36 +815,11 @@ class DBTable implements IDBSerializable {
           // create table
             //trace("creating sql for table "+new_.name);
 
-            var after = new Array();
-            var before = new Array();
-
-            var fields = new_.fields.map(function(f){
-                var r = DBField.toSQL(db_, new_.name, null, f, false);
-                if (r.sql_before != null)
-                  before = before.concat(r.sql_before);
-                if (r.sql_after != null)
-                  after = after.concat(r.sql_after);
-                return r.fields.join(",\n");
-            }).join("\n,");
-
-            requests = requests.concat(before);
-            requests.push(
-              "CREATE TABLE "+new_.name+ "(\n"
-              + fields +"\n"
-              + (new_.primaryKeys.length > 0 ? ", PRIMARY KEY ("+ new_.primaryKeys.join(", ")+") \n" : "" )
-              +") WITH OIDS;\n");
-            requests = requests.concat(after);
+          create_table();
 
         } else if (new_ == null) {
           // drop table
-
-          requests.push( "DROP TABLE "+old.name+ ";" );
-          // possible cleanups (remove enum types ?)
-          for (f in old.fields){
-            var r = DBField.toSQL(db_, old.name, f, null, false);
-            if (r.sql_after != null)
-              requests = requests.concat(r.sql_after);
-          }
+          drop_table();
             
         } else {
           // change table
@@ -745,9 +829,9 @@ class DBTable implements IDBSerializable {
           var changeSets = DBHelper.sep( old == null ? new Array() : old.fields
                         , new_ == null ? new Array() : new_.fields );
 
-          for (n in changeSets.n){ pushAll(DBField.toSQL(db_, new_.name, null, n, true)); }
-          for (k in changeSets.k){ pushAll(DBField.toSQL(db_, new_.name, k.o, k.n, true)); }
-          for (o in changeSets.o){ pushAll(DBField.toSQL(db_, new_.name, o, null, true)); }
+          for (n in changeSets.n){ pushAll(false, DBField.toSQL(db_, new_.name, null, n, false)); }
+          for (k in changeSets.k){ pushAll(false, DBField.toSQL(db_, new_.name, k.o, k.n, false)); }
+          for (o in changeSets.o){ pushAll(false, DBField.toSQL(db_, new_.name, o, null, false)); }
 
           if (old.primaryKeys != new_.primaryKeys){
             if (old.primaryKeys.length > 0)
@@ -764,26 +848,36 @@ class DBTable implements IDBSerializable {
 
         if (old == null){
           // create table
-          throw "MySQL TODO";
+          create_table();
 
 
         } else if (new_ == null){
           // drop table
-          requests.push( "DROP TABLE "+old.name+ ";" );
-          throw "MySQL TODO";
+          drop_table();
 
         } else {
           // change table
 
+          if (old.name != new_.name)
+            throw "changing names not implemnted yet!";
+
+          var changeSets = DBHelper.sep( old == null ? new Array() : old.fields
+                        , new_ == null ? new Array() : new_.fields );
+
+          for (n in changeSets.n){ pushAll(true, DBField.toSQL(db_, new_.name, null, n, false)); }
+          for (k in changeSets.k){ pushAll(false, DBField.toSQL(db_, new_.name, k.o, k.n, false)); }
+          for (o in changeSets.o){ pushAll(false, DBField.toSQL(db_, new_.name, o, null, false)); }
 
           if (old.primaryKeys != new_.primaryKeys){
-            if (old.primaryKeys.length > 0)
-              requests.push("ALTER TABLE "+old.name+" DROP PRIMARY KEY");
+            trace("A");
+            if (old.primaryKeys.length > 0 && !mysql_primary_included(old))
+              requests.push("ALTER TABLE "+old.name+" DROP KEY "+old.name+"_pkey");
 
-            if (new_.primaryKeys.length > 0)
+            trace("B");
+            if (new_.primaryKeys.length > 0 && !mysql_primary_included(new_))
               requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
           }
-          throw "MySQL TODO";
+
         }
     } // }}}
 
