@@ -119,6 +119,16 @@ ATTENTION: The syntax changed slightly. See comments top of DBTool.hx - and read
 
 == RUN TEST SUITE ==
 
+a) real-world-test:
+
+      cd real-world-test/
+      cp mysql-connection.txt.example mysql-connection.txt
+      cp postgresql-connection.txt.example postgresql-connection.txt
+      $EDITOR mysql-connection.txt postgresql-connection.txt
+      bash test.sh
+
+b) simple test suite for DBConnection
+
 Create a file with these contents:
 
       localhost
