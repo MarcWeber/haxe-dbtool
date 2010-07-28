@@ -147,7 +147,8 @@ class DBFDIndex extends DBFieldDecorator {
           extraFieldText : "",
           sql_before : [],
           sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
-          sql_remove: droppingTable ? [] : ["ALTER TABLE "+tableName+" DROP INDEX "+index_name]
+          // if field was dropped index does no longer exist
+          sql_remove: droppingTable ? [] : ["DROP INDEX IF EXISTS "+index_name]
 
         }
       case db_mysql:
@@ -233,6 +234,14 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
 
     switch (db_){
       case db_postgres:
+
+        var sql_remove = new Array();
+        if (__onUpdate) {
+          if (!droppingTable)
+            sql_remove.push("DROP TRIGGER update_timestamp_"+tableName+"_"+field+"_trigger ON "+tableName);
+          sql_remove.push("DROP FUNCTION update_timestamp_"+tableName+"_"+field+"()");
+        }
+
         return {
           extraFieldText : __onInsert ? " default CURRENT_TIMESTAMP " : "",
           sql_before : [],
@@ -256,11 +265,7 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
                             EXECUTE PROCEDURE update_timestamp_"+tableName+"_"+field+"();
                         "
                         ] : [],
-          sql_remove:
-            __onUpdate
-            ? ["DROP TRIGGER update_timestamp_"+tableName+"_"+field+"_trigger",
-               "DROP FUNCTION update_timestamp_"+tableName+"_"+field]
-            : []
+          sql_remove: sql_remove
 
         }
       case db_mysql:
@@ -625,14 +630,7 @@ class DBField implements IDBSerializable {
       var res = new Array();
       var drop_fields;
 
-      switch (db_){
-        case db_mysql:
-          drop_fields = ["ALTER TABLE "+tableName+" DROP "+old.name];
-        case db_postgres:
-          drop_fields = ["ALTER TABLE "+tableName+" DROP FIELD "+old.name];
-        default:
-          throw "not implemented yet";
-      }
+      drop_fields = ["ALTER TABLE "+tableName+" DROP "+old.name];
 
       return {
         sql_after: merged.sql_remove,
@@ -750,9 +748,9 @@ class DBTable implements IDBSerializable {
         requests = requests.concat(r.sql_before);
       if (pushCreateFields)
         requests = requests.concat(r.sql_create_fields);
+      requests = requests.concat(r.sql_drop_fields);
       if (r.sql_after != null)
         requests = requests.concat(r.sql_after);
-      requests = requests.concat(r.sql_drop_fields);
     }
     var mysql_primary_included = function(x:DBTable){
       var autoInc = x.autoincField();
@@ -829,14 +827,17 @@ class DBTable implements IDBSerializable {
           var changeSets = DBHelper.sep( old == null ? new Array() : old.fields
                         , new_ == null ? new Array() : new_.fields );
 
-          for (n in changeSets.n){ pushAll(false, DBField.toSQL(db_, new_.name, null, n, false)); }
+          if (old.primaryKeys != new_.primaryKeys){
+            // drop primary key before column is dropped!
+            if (old.primaryKeys.length > 0)
+              requests.push("ALTER TABLE "+old.name+" DROP CONSTRAINT "+old.name+"_pkey");
+          }
+
+          for (n in changeSets.n){ pushAll(true, DBField.toSQL(db_, new_.name, null, n, false)); }
           for (k in changeSets.k){ pushAll(false, DBField.toSQL(db_, new_.name, k.o, k.n, false)); }
           for (o in changeSets.o){ pushAll(false, DBField.toSQL(db_, new_.name, o, null, false)); }
 
           if (old.primaryKeys != new_.primaryKeys){
-            if (old.primaryKeys.length > 0)
-              requests.push("ALTER TABLE "+old.name+" DROP CONSTRAINT "+old.name+"_pkey");
-
             if (new_.primaryKeys.length > 0)
               requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
           }

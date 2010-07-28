@@ -98,7 +98,8 @@ class Test {
       case "postgres":
         dbType = db_postgres;
         var lines = neko.io.File.getContent("postgres-connection.txt").split("\n");
-        cnx = new DBConnection(php.db.Postgresql.open("dbname="+lines[0]+" user="+lines[1]+" password="+lines[2]+" host="+lines[3]));
+        cnx = new DBConnection(php.db.Postgresql.open("dbname="+lines[0]+" user="+lines[1]+" password="+lines[2]+" "
+                      +(lines[3] == "" ? "" : "host="+lines[3]+" port="+lines[4]) ));
       default:
         throw "unexpected first argument";
     }

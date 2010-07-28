@@ -9,6 +9,30 @@
 
 set -e
 
+TESTS="postgres_test mysql_test"
+
+for arg in "$@"; do
+  case "$arg" in
+    -d|--debug) set -x ;;
+    mysql|postgres) TESTS="${arg}_test"
+    ;;
+    -h|--help)
+      cat << EOF
+      usage $0:
+      -h or --help: print this usage
+      postgres:  run Postgresql test only
+      mysql:     run MySQL test only
+      -d:        set -x
+EOF
+      exit 1
+    ;;
+    *) 
+      echo "unexpected arg: $arg";
+      exit 1
+    ;;
+  esac
+done
+
 if [ "$1" == "-d" ]; then
   set -x
 fi
@@ -69,12 +93,13 @@ run(){
     INFO "updating database (running gerenated code)"
     RUN php $type $step update
 
-    INFO "running tests no this scheme version"
+    INFO "running tests on this scheme $step"
     RUN php $type $step test
   done
 }
 
-  { 
+mysql_test()
+{
     INFO "testing MySQL"
     {
       # [1]
@@ -87,14 +112,15 @@ run(){
 
   MYSQL="mysql -u $MYSQL_USER --password=$MYSQL_PASSWORD -h $MYSQL_HOST -P $MYSQL_PORT"
 
+  # recreate db
   $MYSQL <<< "DROP DATABASE $MYSQL_DATABASE" || true
   $MYSQL <<< "CREATE DATABASE $MYSQL_DATABASE"
-
 
   run mysql
 
 }
 
+postgres_test()
 {
   INFO "testing Postgresql"
 
@@ -107,8 +133,14 @@ run(){
     read PGPORT ; export PGPORT
   } <<< "$(cat postgres-connection.txt)"
 
+  # recreate db
   dropdb $PGDATABASE || true
   createdb $PGDATABASE
+  echo "CREATE LANGUAGE plpgsql" | psql $PGDATABASE
 
   run postgres
 }
+
+for t in $TESTS; do
+  $t
+done
