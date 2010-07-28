@@ -1,0 +1,6 @@
+-cp ..
+-main Test
+-D prepare
+--php-front index.php
+--remap neko:php
+-php php
