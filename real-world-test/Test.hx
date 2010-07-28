@@ -2,21 +2,22 @@
 import db.DBConnection;
 import db.DBTool;
 import db.DBTable;
+import Types;
 
 #if !prepare
+#if db_postgres
 import DBUpdatePostgreSQL;
+#elseif db_mysql
+import DBUpdateMySQL;
+#else
+  TODO
+#end
 
 #if step1
-  import dbobjects.Simple;
+  import dbobjects.SimpleAliased;
 #end
   import dbobjects.Simple2;
-
 #end
-
-enum MyEnum {
-  EA;
-  EB;
-}
 
 class Test {
 
@@ -24,19 +25,22 @@ class Test {
     var dbTool = new DBTool(cnx,
       {pathPrefix:"generated-src/", fqn: ""},
       {pathPrefix:"generated-src/", pkg:"dbobjects"}
-    );
+    ).addImports(["Types"]);
 
 #if step1
 
     // its simple to declare a table:
     dbTool.addTable("Simple", ["id"], [
         new DBField("id", db_int).autoinc(),
-        new DBField("man", db_bool).nullable,
+        new DBField("man", db_bool).nullable(),
         new DBField("firstname", db_varchar(50)),
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
         new DBField("registered", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+#if !db_mysql
+        // see DBFDCurrentTimestmap
         new DBField("changed", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
-      ]).className("User");
+#end
+      ]).className("SimpleAliased");
 #end
 
 
@@ -50,21 +54,19 @@ class Test {
 #end
         ],
         [
-        new DBField("dummy", db_varchar(4))
+        new DBField("dummy", db_varchar(4)),
 #if step2
         new DBField("id", db_int).autoinc(),
 
-        new DBField("man", db_bool).nullable,
+        new DBField("man", db_bool).nullable(),
         new DBField("firstname", db_varchar(50)),
 
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
         new DBField("registered", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
-        new DBField("changed", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
 #end
 
 #if step3
-
-        new DBField("man", db_bool) // no more .nullable
+        new DBField("man", db_bool), // no more .nullable
         new DBField("firstname", db_varchar(80)), // increase length
 #end
     ]);
@@ -74,9 +76,14 @@ class Test {
 
   static function main() {
     var args = neko.Sys.args();
+
+    var database = args[0];
+    var step = args[1];
+    var task = args[2];
+
     var dbType: DBSupportedDatabaseType;
     var cnx: DBConnection;
-    switch (args[0]){
+    switch (database){
       case "mysql":
         dbType = db_mysql;
         var lines = neko.io.File.getContent("mysql-connection.txt").split("\n");
@@ -96,16 +103,18 @@ class Test {
         throw "unexpected first argument";
     }
 
-    var step = args[1];
 
     var dbt = dbTool(cnx.cnx);
 
-    switch (args[2]){
+    switch (task){
       case "prepare":
+        trace("preparing step"+step);
         dbt.prepareUpdate(dbType);
       case "update":
+        trace("updating scheme step"+step);
         dbt.doUpdate();
       case "test":
+        trace("running tests step "+step);
         trace("test that everything worked must be implemented - do you want to help me?");
     }
   
