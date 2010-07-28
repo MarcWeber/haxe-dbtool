@@ -1,0 +1,4 @@
+enum MyEnum {
+  EA;
+  EB;
+}
