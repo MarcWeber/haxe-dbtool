@@ -1,5 +1,9 @@
 == haxe-dbtool - a small library writing both: the SPOD objects and SQL queries
 
+A complete example is real-world-test/Test.hx.
+
+Description (no longer up to dote. But you get the idea faster)
+
 Example:
 
     var dbTool =
