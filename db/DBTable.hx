@@ -18,10 +18,6 @@ enum DBToolFieldType {
   db_haxe_enum_simple_as_index(e:String);
 }
 
-enum DBToolFieldAutoValue {
-  auto_inc;
-}
-
 enum DBEither<A,B> {
   db_left(x:A);
   db_right(x:B);
@@ -132,7 +128,7 @@ class DBFDComment extends DBFieldDecorator {
 
 
 class DBFDIndex extends DBFieldDecorator {
-  var __uniq: Bool;
+  public var __uniq: Bool;
 
   public function new(?uniq:Bool) {
     __uniq = uniq;
@@ -150,7 +146,7 @@ class DBFDIndex extends DBFieldDecorator {
         return {
           extraFieldText : "",
           sql_before : [],
-          sql_after: ["CREATE "+(__uniq ? "UNIQ" : "" )+" INDEX "+index_name+" "+tableName+"("+field+")"],
+          sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
           sql_remove: ["DROP INDEX "+index_name]
 
         }
@@ -158,11 +154,49 @@ class DBFDIndex extends DBFieldDecorator {
         return {
           extraFieldText : "",
           sql_before : [],
-          sql_after: ["CREATE "+(__uniq ? "UNIQ" : "" )+" "+index_name+" INDEX "+tableName+"("+field+")"],
+          sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" "+index_name+" INDEX "+tableName+"("+field+")"],
           sql_remove: ["DROP INDEX "+index_name]
         }
     }
   }
+}
+
+
+class DBFDAutoinc extends DBFieldDecorator {
+
+  public function new() {
+  }
+
+  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String):{
+    extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
+    sql_before: Array<String>,    // eg create postgresql sequence
+    sql_after: Array<String>,     // eg setup trigger
+    sql_remove: Array<String>,         // drop trigger and / or sequence
+  } {
+    if (type != db_int)
+      throw "DBFDAutoinc only supports db_int fields!";
+
+    switch (db_){
+      case db_postgres:
+        var seq_name = "autoinc_sequence_"+tableName+"_"+field;
+        return {
+          extraFieldText : " DEFAULT nextval('"+seq_name+"') ",
+          sql_before : ["CREATE SEQUENCE "+seq_name ],
+          sql_after: [],
+          sql_remove: ["DROP SEQUENCE "+seq_name ]
+
+        }
+      case db_mysql:
+        return {
+          extraFieldText : " autoinc ",
+          sql_before : [],
+          sql_after: [],
+          sql_remove: []
+        }
+    }
+      
+  }
+
 }
 
 class DBFDCurrentTimestmap extends DBFieldDecorator {
@@ -244,12 +278,17 @@ class DBField implements IDBSerializable {
   public var name: String;
   public var type: DBToolFieldType;
   public var __references: Null<{table: String, field: String}>;
-  public var __autovalue: Null<DBToolFieldAutoValue>;
   public var __nullable: Bool;
-  public var __uniq: Bool;
-  public var __indexed: Bool;
-  public var __default: Bool;
-  public var __comment: String;
+
+  // property __uniq {{{1
+  // if this field is the only primary key its uniq as well - but this can only be known in the table
+  public var __uniq(get__uniq, null) : Bool;
+  private function get__uniq(): Bool {
+    return __decorators.filter(function(x){ return Std.is(x, DBFDIndex) && cast(x, DBFDIndex).__uniq; }).length > 0;
+  }
+  // }}}
+  
+
   public var __decorators: Array<DBFieldDecorator>;
 
   // serialization {{{2
@@ -268,6 +307,7 @@ class DBField implements IDBSerializable {
   public function new(name: String, type:DBToolFieldType, ?decorators:Array<DBFieldDecorator>){
     this.name = name;
     this.type = type;
+    this.__nullable = false;
     __decorators = decorators == null ? [] : decorators;
     switch (type){
       case db_haxe_enum_simple_as_index(e):
@@ -277,13 +317,8 @@ class DBField implements IDBSerializable {
     }
   }
 
-  public function nullable(?nullable:Bool){
-    __nullable = nullable != null && nullable;
-  }
-
-  public function autovalue(a: Null<DBToolFieldAutoValue>){
-    this.__autovalue = a;
-    return this;
+  public function nullable(){
+    __nullable = true;
   }
 
   public function references(table: String, field:String) {
@@ -301,11 +336,10 @@ class DBField implements IDBSerializable {
     return this;
   }
 
-  public function comment(c:String) {
-    this.__comment = c;
+  public function autoinc() {
+    this.__decorators.push(new DBFDAutoinc());
     return this;
   }
-
 
   function field(name:String, haxeType:String){
      return
@@ -428,47 +462,62 @@ class DBField implements IDBSerializable {
       db_: DBSupportedDatabaseType,
       tableName: String,
       f: DBField):{
-        fields: Array<String>,
-        fieldNames: Array<String>,
-        sql_before: Array<String>,
-        sql_after : Array<String>,
-        sql_remove : Array<String>
+        fields: Array<String>,     // fields to be inserted into a CREATE TABLE or ALTER TABLE XY CHANGE statement
+        alter: Array<String>,       // string after ALTER TABLE xy ..
+                                   // for mysql this is CHANGE ..
+                                   // for postgresql this is more sophisticated
+        fieldNames: Array<String>, // the names of the fields, so that ATLTER TABLE DROP FIELD .. can be generated
+        sql_before: Array<String>, // SQL to setup triggers, sequences or whatnot
+        sql_after : Array<String>, // same, but run after CREATE TABLE ..
+        sql_remove : Array<String> // remove what sql_before, sql_after added to the database
     }{
 
     switch (db_){
       case db_postgres: // {{{
         var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators);
+        var nullable = (f.__nullable) ? "" : " NOT NULL ";
 
         var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
         var field:Array<String>;
+        var type:String; // TODO use Array
 
         switch (f.type){
           case db_varchar(length):
-            field = [f.name+" varchar("+length+")" + merged.extraFieldText + references];
+            type = "varchar("+length+")";
+            field = [f.name+" "+type+ " " + nullable + merged.extraFieldText + references];
           case db_bool:
-            field = [f.name+" bool" +  merged.extraFieldText + references];
+            type = "bool";
+            field = [f.name+" "+type+" " + nullable +  merged.extraFieldText + references];
           case db_int:
-            field = [f.name+" int" +  merged.extraFieldText + references];
+            type = "int";
+            field = [f.name+" "+ type + " " + nullable +  merged.extraFieldText + references];
           case db_enum(valid_items):
             var fun = function(x){ return "'"+x+"'"; };
             var enumTypeName = tableName+"_"+f.name;
-            field = [f.name+" "+enumTypeName + " " +  merged.extraFieldText + references];
+            type = enumTypeName;
+            field = [f.name+" "+type + " " + nullable +  merged.extraFieldText + references];
             merged.sql_before.push("CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(fun).join(",")+")");
           case db_date:
-             field = [f.name+" timestamp " +  merged.extraFieldText + references];
+             type = "timestamp";
+             field = [f.name+" "+type+" " + nullable + merged.extraFieldText + references];
 
           case db_text:
-            field = [f.name+" text" +  merged.extraFieldText + references];
+             type = "text";
+            field = [f.name+" "+type+" " + nullable + merged.extraFieldText + references];
 
           case db_haxe_enum_simple_as_index(e):
-            field = [f.name+" int" +  merged.extraFieldText + references];
+            type = "int";
+            field = [f.name+" "+type+" " + nullable +  merged.extraFieldText + references];
             var enumTypeName = tableName+"_"+f.name;
             var f = function(x){ return "'"+x+"'"; };
             merged.sql_remove.push("DROP TYPE "+enumTypeName);
         }
 
+        var a = "ALTER "+f.name+" ";
+
         return {
           fields: field,
+          alter:  [ [a+"TYPE "+type, a+(f.__nullable ? "DROP NOT NULL" : "SET NOT NULL")].join(", ") ],
           fieldNames: [ f.name ],
           sql_before: merged.sql_before,
           sql_after : merged.sql_after,
@@ -503,6 +552,7 @@ class DBField implements IDBSerializable {
 
         return {
           fields: field,
+          alter: ["CHANGE "+f.name+" "+f.name+" "+field],
           fieldNames: [ f.name ],
           sql_before : merged.sql_before,
           sql_after  : merged.sql_after,
@@ -567,7 +617,7 @@ class DBField implements IDBSerializable {
         for (i in 0 ... old__code.fields.length){
           var n = old__code.fieldNames[i];
           if (old__code.fields[i] != new__code.fields[i])
-            changeFields.push("ALTER TABLE "+tableName+" CHANGE "+n+" "+new__code.fields[i]);
+            changeFields.push("ALTER TABLE "+tableName+" "+new__code.alter[i]);
         }
       } else {
         // drop old
