@@ -1,8 +1,15 @@
 == haxe-dbtool - a small library writing both: the SPOD objects and SQL queries
 
 A complete example is real-world-test/Test.hx.
+Run it once by:
+a) Creating the connection files. To do so remove the .example from the example
+   connection files.
+b) Then run tesh.sh mysql   or test.sh postgres
 
-Description (no longer up to dote. But you get the idea faster)
+There should be no errors. You should have new directory called generated-src.
+It contains both: SPOD objects and a class which creates / updates your database.
+
+== Description (no longer up to dote. But you get the idea faster)
 
 Example:
 
@@ -73,8 +80,6 @@ scheme applied to the database. The hash_of_serialized_scheme contains a hash
 of the current database schema. You'll learn soon about its purpose. Just note
 that at the end of scheme1 the db_version table is updated to reflect the
 change.
-
-// TODO SPOD objects will be created as well in the near future
 
 Let's play around and add another field called landing_page:
  
