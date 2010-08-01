@@ -64,7 +64,13 @@ class DBHelper {
 
 class DBFieldDecorator {
 
-  public function decorate(db: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
+  public function decorate(db: DBSupportedDatabaseType
+, type: DBToolFieldType
+, tableName:String
+, field:String
+, droppingTable: Bool
+, droppingField: Bool
+):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -79,8 +85,15 @@ class DBFieldDecorator {
     }
   }
 
-  static public function merge(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, decorators: Array<DBFieldDecorator>, droppingTable:Bool){
-    var decorateList   = decorators.map(function(d){ return d.decorate(db_,  type, tableName, field, droppingTable); });
+  static public function merge(db_: DBSupportedDatabaseType,
+       type: DBToolFieldType,
+       tableName:String,
+       field:String,
+       decorators: Array<DBFieldDecorator>,
+       droppingTable:Bool,
+       droppingField:Bool
+ ){
+    var decorateList   = decorators.map(function(d){ return d.decorate(db_,  type, tableName, field, droppingTable, droppingField); });
     return{
       extraFieldText  : decorateList.map(function(d){ return d.extraFieldText; }).join(" "),
       sql_before      : DBHelper.concatArrays(decorateList.map(function(d){ return d.sql_before; })),
@@ -99,7 +112,13 @@ class DBFDComment extends DBFieldDecorator {
     __comment = comment;
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
+  override public function decorate(db_: DBSupportedDatabaseType
+, type: DBToolFieldType
+, tableName:String
+, field:String
+, droppingTable: Bool
+, droppingField: Bool
+):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -134,7 +153,13 @@ class DBFDIndex extends DBFieldDecorator {
     __uniq = uniq;
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
+  override public function decorate(db_: DBSupportedDatabaseType
+      , type: DBToolFieldType
+      , tableName:String
+      , field:String
+      ,droppingTable: Bool
+      ,droppingField: Bool
+      ):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -148,7 +173,7 @@ class DBFDIndex extends DBFieldDecorator {
           sql_before : [],
           sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
           // if field was dropped index does no longer exist
-          sql_remove: droppingTable ? [] : ["DROP INDEX IF EXISTS "+index_name]
+          sql_remove: droppingTable || droppingField ? [] : ["DROP INDEX IF EXISTS "+index_name]
 
         }
       case db_mysql:
@@ -156,7 +181,7 @@ class DBFDIndex extends DBFieldDecorator {
           extraFieldText : "",
           sql_before : [],
           sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
-          sql_remove: droppingTable ? [] : ["ALTER TABLE "+tableName+" DROP INDEX "+index_name]
+          sql_remove: droppingTable || droppingField ? [] : ["ALTER TABLE "+tableName+" DROP INDEX IF EXISTS "+index_name]
         }
     }
   }
@@ -168,7 +193,13 @@ class DBFDAutoinc extends DBFieldDecorator {
   public function new() {
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable: Bool):{
+  override public function decorate(db_: DBSupportedDatabaseType
+, type: DBToolFieldType
+, tableName:String
+, field:String
+, droppingTable: Bool
+, droppingField: Bool
+):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -223,7 +254,13 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
     return this;
   }
 
-  override public function decorate(db_: DBSupportedDatabaseType, type: DBToolFieldType, tableName:String, field:String, droppingTable:Bool):{
+  override public function decorate(db_: DBSupportedDatabaseType
+      , type: DBToolFieldType
+      , tableName:String
+      , field:String
+      , droppingTable:Bool
+      , droppingField:Bool
+):{
     extraFieldText: String, // eg ON UPDATE CURRENT_TIMESTAMP or default CURRENT_TIMESTAMP
     sql_before: Array<String>,    // eg create postgresql sequence
     sql_after: Array<String>,     // eg setup trigger
@@ -536,7 +573,8 @@ class DBField implements IDBSerializable {
       db_: DBSupportedDatabaseType,
       tableName: String,
       f: DBField,
-      droppingTable:Bool
+      droppingTable:Bool,
+      droppingField:Bool
       ):{
         fields: Array<String>,     // fields to be inserted into a CREATE TABLE or ALTER TABLE XY CHANGE statement
         alter: Array<String>,       // string after ALTER TABLE xy ..
@@ -550,7 +588,7 @@ class DBField implements IDBSerializable {
 
     switch (db_){
       case db_postgres: // {{{
-        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable);
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable, droppingField);
         var nullable = (f.__nullable) ? "" : " NOT NULL ";
 
         var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
@@ -603,7 +641,7 @@ class DBField implements IDBSerializable {
       // }}}
       case db_mysql: // {{{
 
-        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable);
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable, droppingField);
         var nullable = (f.__nullable) ? "" : " NOT NULL ";
         var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
         var field:Array<String>;
@@ -660,7 +698,7 @@ class DBField implements IDBSerializable {
     if (old == null){
       // create field
 
-      var r = DBField.fieldCode(db_, tableName, new_, droppingTable);
+      var r = DBField.fieldCode(db_, tableName, new_, droppingTable, false);
       r.sql_remove = [];
 
       var createFields = new Array();
@@ -681,8 +719,8 @@ class DBField implements IDBSerializable {
     } else if (new_ == null) {
       // drop field
       
-      var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators, droppingTable);
-      var r = DBField.fieldCode(db_, tableName, old, droppingTable);
+      var merged = DBFieldDecorator.merge(db_, old.type, tableName, old.name, old.__decorators, droppingTable, true);
+      var r = DBField.fieldCode(db_, tableName, old, droppingTable, true);
       var res = new Array();
       var drop_fields;
 
@@ -702,8 +740,8 @@ class DBField implements IDBSerializable {
       if (old.name != new_.name)
         throw "not yet supported changing name of fields from "+old.name+" to "+new_.name;
       
-      var old__code = DBField.fieldCode(db_,tableName, old, droppingTable);
-      var new__code = DBField.fieldCode(db_,tableName, new_, droppingTable);
+      var old__code = DBField.fieldCode(db_,tableName, old, droppingTable, false);
+      var new__code = DBField.fieldCode(db_,tableName, new_, droppingTable, false);
 
       var setup_differ = (old__code.sql_after != new__code.sql_after)
                       || (old__code.sql_before != new__code.sql_before);
