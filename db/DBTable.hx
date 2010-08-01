@@ -5,7 +5,7 @@ using Lambda;
 // representing a database scheme
 
 enum DBToolFieldType {
-  db_varchar( length: Int );
+  db_varchar( length: Int ); // assuming String is UTF-8
   db_bool;
   db_int;
   db_enum( valid_items: List<String> );
@@ -201,8 +201,8 @@ class DBFDAutoinc extends DBFieldDecorator {
 }
 
 class DBFDCurrentTimestmap extends DBFieldDecorator {
-  var __onInsert: Bool;
-  var __onUpdate: Bool;
+  public var __onInsert: Bool;
+  public var __onUpdate: Bool;
 
   // TODO implement this for MySQL. See comments in 
   // must use triggers for MySQL when using more than one column which should be updated.
@@ -359,27 +359,69 @@ class DBField implements IDBSerializable {
     return this;
   }
 
-  function field(name:String, haxeType:String){
+  function field(name:String, haxeType:String, guard:String,
+      simple:Bool,
+      ?raw:String // <- the HaXe type which the db values are read into.
+      ){
+
+    var rawProperty = function(haxeType, getter, setter, propertyName, varname){
+        return 
+       "  public var "+propertyName+"("+getter+", "+setter+") : "+haxeType+";\n"+
+       "  private function "+getter+"(): "+haxeType+" {\n"+
+       "     return "+varname+";\n"+
+       "  }\n"+
+       "  private function "+setter+"(value : "+haxeType+"): "+haxeType+" {\n"+
+          guard +
+       "    if (value == "+varname+") return "+varname+";\n"+
+       "    this.__dirty_data = true;\n"+
+       "    return "+varname+" = value;\n"+
+       "  }\n";
+    };
+    if (simple){
+     // no transformation necessary
      return
        "  private var _"+name+": "+haxeType+";\n"+
+       rawProperty(haxeType, "get"+name, "set"+name, name, "_"+name);
+    } else {
+
+      // types are different - need transforrmation  such as Date String -> Date
+      // or a,b,c -> ["a","b","c"]
+
+     var get = function(s:String){ return name+"ToHaXe("+s+")"; }
+     var set = function(s:String){ return name+"ToDB("+s+")"; } // db -> HaXe and back
+
+     var gt = "get"+name+"DBValue"; // getter setter
+     var st = "set"+name+"DBValue";
+     return
+       "  private var _"+name+": "+raw+";\n"+
        "  public var "+name+"(get"+name+", set"+name+") : "+haxeType+";\n"+
        "  private function get"+name+"(): "+haxeType+" {\n"+
-       "     return _"+name+";\n"+
+       "     return "+get("_"+name)+";\n"+
        "  }\n"+
        "  private function set"+name+"(value : "+haxeType+"): "+haxeType+" {\n"+
-       "    if (value == _"+name+") return _"+name+";\n"+
+          guard +
+       "    var v2 = "+set("value")+";\n"+
+       "    if (v2 == _"+name+") return "+get("_"+name)+";\n"+
        "    this.__dirty_data = true;\n"+
-       "    return _"+name+" = value;\n"+
-       "  }\n";
+       "    _"+name+" = v2;\n"+
+       "    return "+get("_"+name)+";\n"+
+       "  }\n"+
+       rawProperty(raw, gt, st, name+"DBValue", "_"+name);
+     }
   }
 
   // defines the DB <-> HaXe interface for this type
-  public function haxe(db: DBSupportedDatabaseType):{
+  public function haxe(db_: DBSupportedDatabaseType):{
     // the db field type (TODO not yet used. Refactor!)
     dbType: String,
 
     // the HaXe type to be used
     haxeType: String,
+
+    haxeTypeRaw: String, // this is written do database
+
+    // put into new(..) constructor of SPOD?
+    newArg: Bool,
 
     // the "public var field: Field;" line
     // may also contain additional getter/ setter code (eg enum type)
@@ -397,8 +439,14 @@ class DBField implements IDBSerializable {
         return {
           dbType:  "varchar("+length+")",
           haxeType: "String",
+          haxeTypeRaw: "String",
+          newArg: !__nullable,
           spodCode:
-            field(name, "String")+
+            field(name, "String",
+            // TODO assume UTF-8?
+            "   if (value.length > "+length+") throw \"field "+name+" must not be longer than "+length+" characters! Cut off after '\"+value.substr("+length+"-10, 10)+\"'\";",
+            true
+            )+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
         };
@@ -406,17 +454,22 @@ class DBField implements IDBSerializable {
         return {
           dbType: "varchar(1)", // every db has varchar
           haxeType: "Bool",
+          haxeTypeRaw: "String",
+          newArg: !__nullable,
           spodCode:
-            field(name, "Bool")+
+            field(name, "Bool", "", false, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):Bool { return (v == \"y\"); }\n"+ 
             "  static inline public function "+name+"ToDB(v: Bool):String { return v ? \"y\" : \"n\"; }\n"
         };
       case db_int:
+        var d:DBFDAutoinc = cast(decoratorsOftype(DBFDAutoinc).first());
         return {
           dbType: "Int",
           haxeType: "Int",
+          haxeTypeRaw: "Int",
+          newArg: !__nullable && d == null,
           spodCode:
-            field(name, "Int")+
+            field(name, "Int", "", true)+
             "  static inline public function "+name+"ToHaXe(v: Int):Int { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: Int):Int { return v; }\n"
 
@@ -425,51 +478,54 @@ class DBField implements IDBSerializable {
         return {
           dbType: "String",
           haxeType: "String",
+          haxeTypeRaw: "String",
+          newArg: !__nullable,
           spodCode:
-            field(name, "String")+
+            field(name, "String", "", true)+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
         };
       case db_date:
+        var d:DBFDCurrentTimestmap = cast(decoratorsOftype(DBFDCurrentTimestmap).first());
         // TODO
         return{ 
           dbType: "Date",
           haxeType: "Date",
+          haxeTypeRaw: "String",
+          newArg: !__nullable && (d == null || !d.__onInsert),
           spodCode:
-            field(name, "String")+
-            "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
-            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+            field(name, "Date", "", false, "String")+
+            "  static inline public function "+name+"ToHaXe(v: String):Date { return Date.fromString(v); }\n"+
+            "  static inline public function "+name+"ToDB(v: Date):String { return v.toString(); }// TODO check that this works!\n"
 
         };
       case db_text:
-        var dbType = switch (db){
+        var dbType = switch (db_){
           case db_postgres: "text";
           default: "text";
         }
         return {
           dbType: dbType,
           haxeType: "String",
+          haxeTypeRaw: "String",
+          newArg: !__nullable,
           spodCode:
-            field(name, "String")+
+            field(name, "String", "", true)+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
 
         };
       case db_haxe_enum_simple_as_index(e):
-        var gt = "get"+name+"AsEnum";
-        var st = "set"+name+"AsEnum";
         var tE = name+"toEnum";
         return {
           dbType: "int",
           haxeType: e,
+          haxeTypeRaw: "Int",
+          newArg: !__nullable,
           spodCode:
-            field(name, "Int")+
+            field(name, e, "", false, "Int")+
             "  static inline public function "+name+"ToHaXe(i:Int):"+e+"{ return Type.createEnumIndex("+e+", i); }\n"+
-            "  static inline public function "+name+"ToDB(v: "+e+"):Int { return Type.enumIndex(v); }\n"+
-            // getter + setter
-            "   public var "+name+"AsEnum("+gt+", "+st+") : "+e+";\n"+
-            "   function "+gt+"():"+e+"{ return  "+name+"ToHaXe("+name+"); }\n"+
-            "   function "+st+"(value : "+e+") :"+e+"{ "+name+" = "+name+"ToDB(value); return value; }\n"
+            "  static inline public function "+name+"ToDB(v: "+e+"):Int { return Type.enumIndex(v); }\n"
         };
     }
 

@@ -4,6 +4,11 @@ import db.DBTool;
 import db.DBTable;
 import Types;
 
+import utest.Runner;
+import utest.ui.Report;
+import utest.Assert;
+import utest.TestResult;
+
 #if !prepare
 #if db_postgres
 import DBUpdatePostgreSQL;
@@ -117,8 +122,92 @@ class Test {
       case "test":
         trace("running tests step "+step);
         trace("test that everything worked must be implemented - do you want to help me?");
+        var runner = new Runner();
+#if !prepare
+#if step1
+        runner.addCase(new TestStep1());
+#elseif step2
+        runner.addCase(new TestStep2());
+#elseif step3
+        runner.addCase(new TestStep3());
+#elseif step4
+        runner.addCase(new TestStep4());
+#end
+#end
+
+        var r:TestResult = null;
+        runner.onProgress.add(function(o){ if (o.done == o.totals) r = o.result;});
+        Report.create(runner);
+        runner.run();
+
+        neko.Sys.exit(allOk(r) ? 0 : 1);
     }
-  
+
+  }
+
+
+  static public function allOk(t :TestResult):Bool{
+          for (l in t.assertations){
+                  switch (l){
+                          case Success(pos): break;
+                          default: return false;
+                  }
+          }
+          return true;
   }
 
 }
+
+#if !prepare
+#if step1
+class TestStep1 {
+
+  public function new(){}
+
+  function test() {
+    var u = new SimpleAliased("Marc", MyEnum.EA);
+    try{
+      // should throw Exception, because its too long
+      Assert.equals(0,0);
+      u.firstname = "012345678 012345678 012345678 012345678 012345678 012345678";
+      Assert.equals(1,0);
+    }catch(e:Dynamic){
+    }
+  }
+
+}
+#elseif step2
+class TestStep2 {
+
+  public function new(){}
+
+  public function test() {
+     Assert.equals(0,0);
+     // TODO
+  }
+
+}
+#elseif step3
+class TestStep3 {
+
+  public function new(){}
+
+  public function test() {
+     Assert.equals(0,0);
+     // TODO
+  }
+
+}
+#elseif step4
+class TestStep4 {
+
+  public function new(){}
+
+  public function test() {
+     Assert.equals(0,0);
+     // TODO
+  }
+
+}
+#end
+#end

@@ -117,7 +117,9 @@ class DBTool {
 
   static public var markers = {
     start : "  // GENERATED CODE START",
-    end : "  // GENERATED CODE END"
+    end : "  // GENERATED CODE END",
+    start_new : "  // GENERATED CODE START NEW",
+    end_new : "  // GENERATED CODE END NEW"
   };
 
   function updateSPODS(db_:DBSupportedDatabaseType, up){
@@ -166,6 +168,22 @@ class DBTool {
 
       generatedCode.push(markers.end);
 
+      var generatedCodeNew = new Array();
+      var args_ = t.fields.map(function(f){
+          var x =f.haxe(db_);
+          return {
+            name: f.name,
+            newArg: x.newArg,
+            haxe: x.haxeType
+          }
+        }).filter(function(f){ return f.newArg; });
+      generatedCodeNew.push(markers.start_new);
+      generatedCodeNew.push("  public function new("+ args_.map(function(f){return f.name+":"+f.haxe;}).join(", ") +"){");
+      for (a in args_)
+        generatedCodeNew.push("    this."+a.name+" = "+a.name+";");
+      generatedCodeNew.push(markers.end_new);
+      generatedCodeNew.push("");
+
       // TODO think about defaults and constructor
 
       var lines = new Array();
@@ -185,33 +203,48 @@ class DBTool {
         lines.push("");
         lines.push("class "+t.__SPODClassName+" extends db.DBObject {");
 
+        lines.push("  ");
+        lines = lines.concat(generatedCodeNew);
+        lines.push("  }");
+
         lines = lines.concat(generatedCode);
         lines.push("   public static var manager = new db.DBManager<"+t.__SPODClassName+">("+t.__SPODClassName+");");
         lines.push("}");
+
+
       } else {
-        var parsed = parseSpodObject(file);
-        lines = lines.concat(parsed.before);
+        lines = neko.io.File.getContent(file).split("\n").array();
+
+        // insert new() constructor
+        var parsed = splitAtMarkers(lines, markers.start_new, markers.end_new);
+        lines = parsed.before;
+        lines = lines.concat(generatedCodeNew);
+        lines = lines.concat(parsed.after);
+
+
+        // insert fields
+        parsed = splitAtMarkers(lines, markers.start, markers.end);
+        lines = parsed.before;
         lines = lines.concat(generatedCode);
         lines = lines.concat(parsed.after);
+
       }
 
       info("writing (updating) SPOD class "+file);
+      for (l in lines)
       writeFile(file, lines);
 
     }
   }
 
-  // split file at
-  // // GENERATED CODE START / END markers
-  function parseSpodObject(file){
-    var lines = neko.io.File.getContent(file).split("\n").array();
+  static public function splitAtMarkers(lines:Array<String>, start, end){
     var buffer = new List();
     var before = new Array();
     var contents = new Array();
     for (l in lines)
-      if (l.startsWith(markers.start)){
+      if (l == start){
         before = buffer.array();
-      } else if (l.startsWith(markers.end)) {
+      } else if (l == end) {
         buffer = new List();
       } else {
         buffer.add(l);

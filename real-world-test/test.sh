@@ -16,6 +16,9 @@ for arg in "$@"; do
     -d|--debug) set -x ;;
     mysql|postgres) TESTS="${arg}_test"
     ;;
+    --show-log)
+      SHOW_LOG=1;
+    ;;
     -h|--help)
       cat << EOF
       usage $0:
@@ -23,6 +26,7 @@ for arg in "$@"; do
       postgres:  run Postgresql test only
       mysql:     run MySQL test only
       -d:        set -x
+      --show-log
 EOF
       exit 1
     ;;
@@ -48,7 +52,7 @@ INFO "starting tests"
 
 HAXE(){
   # you have to split lines in current.hxml
-  echo "$@" > current.hxml
+  echo "$@" | sed 's/ -/\n-/g' > current.hxml
   haxe "$@" || {
     echo "compilation failed"
     echo "compilation flags have been written to current.hxml"
@@ -71,6 +75,7 @@ RUN(){
         cat log.txt
         exit 1
       fi
+      [ -z "$SHOW_LOG" ] || cat log.txt
     ;;
     *)
     ;;
@@ -79,7 +84,7 @@ RUN(){
 
 run(){
   local type=$1
-  args=" -cp ..  -main Test --php-front Test.php --remap neko:php -php php -cp generated-src "
+  args="-lib utest -cp ..  -main Test --php-front Test.php --remap neko:php -php php -cp generated-src "
   for step in 1 2 3; do
     echo
     INFO ">> $type step $step"
