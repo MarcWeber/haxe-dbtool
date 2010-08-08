@@ -130,8 +130,6 @@ class Test {
 #if !prepare
 #if step1
 
-        var id = new SimpleAliased("firstname", EA).store().idDB;
-        DBManager.cleanup();
         runner.addCase(new TestStep1());
 #elseif step2
         runner.addCase(new TestStep2());
@@ -173,7 +171,6 @@ class TestStep1 {
 
   function test() {
     var u = new SimpleAliased("Marc", MyEnum.EA);
-    trace("A");
     try{
       // should throw Exception, because its too long
       Assert.equals(0,0);
@@ -194,7 +191,9 @@ class TestStep1 {
     DBManager.cleanup();
 
     for (x in 0 ... num){
-      Assert.equals(SimpleAliased.get(ids[x]).firstnameDB, "firstname"+x);
+      var g = SimpleAliased.get(ids[x]);
+      Assert.equals(g.firstnameDB, "firstname"+x);
+      Assert.equals(g.myenumH, EA);
     }
 
   }
