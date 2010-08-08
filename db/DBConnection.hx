@@ -96,7 +96,8 @@ class DBConnection {
 
     for( n in names ) {
       fields.add(this.quoteName(n));
-      values.add(this.quote(Reflect.field(o,n)));
+      var f = Reflect.field(o,n);
+      values.add((f==null) ? "NULL" : this.quote(f));
     }
 
     var s = new StringBuf();
@@ -208,7 +209,7 @@ class DBConnection {
 
   // get result from db
   public function query<R>(s:String, withResult: DBResultSet -> R):R {
-    var resultSet = new DBResultSet(cnx.request(s), this);
+    var resultSet = new DBResultSet(request(s), this);
 
     return HE.tryFinally(function(){
         return withResult(resultSet);
@@ -220,7 +221,7 @@ class DBConnection {
 
   // return last insertId
   public function execute(s:String){
-    cnx.request(s);
+    request(s);
   }
 
   public function queryIntPH(s:String, ?args:Array<Dynamic>){
@@ -240,18 +241,17 @@ class DBConnection {
     return query(substPH(query_, args), withResult);
   }
 
-  /*
-  // don't provide request, force users to use query which call free
-  // make neko.db.Connection stuff available {{{
-  public function request( s : String ){
+  // don't provide request, force users to use query which call free {{
+  private function request( s : String ){
     if (sqlLogger != null){
       sqlLogger(s);
     }
     return new DBResultSet(cnx.request(s), this);
   }
-  */
 
   // QUERY INTERAFCE END }}}
+
+  // make neko.db.Connection stuff available
 
   public inline function close(){
     cnx.close();

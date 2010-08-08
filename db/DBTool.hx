@@ -110,8 +110,22 @@ class DBTool {
         generatedCode.push(haxe.spodCode);
       }
 
+
+      var haxe_fieldInfo = t.fields.map(function(f){
+          var x =f.haxe(db_);
+          return {
+            name: f.name,
+            newArg: x.newArg,
+            insert: x.insert,
+            haxe: x.haxeType
+          }
+        });
+      var insertFields = haxe_fieldInfo.filter(function(f){ return f.insert; });
+
       // table fields
       generatedCode.push("  static var TABLE_FIELDS = ["+t.fields.map(function(s){ return "\""+s.name+"\""; }).join(", ")+"];");
+
+      generatedCode.push("  static var TABLE_FIELDS_NEW = ["+insertFields.map(function(s){ return "\""+s.name+"\""; }).join(", ")+"];");
 
       // primary keys
       if (t.primaryKeys.length > 0){
@@ -158,24 +172,16 @@ class DBTool {
       generatedCode.push(markers.end);
 
       var generatedCodeNew = new Array();
-      var args_ = t.fields.map(function(f){
-          var x =f.haxe(db_);
-          return {
-            name: f.name,
-            newArg: x.newArg,
-            haxe: x.haxeType
-          }
-        }).filter(function(f){ return f.newArg; });
+      var args_ = haxe_fieldInfo.filter(function(f){ return f.newArg; });
       generatedCodeNew.push(markers.start_new);
 
       generatedCodeNew.push("  public function new("+ args_.map(function(f){return f.name+":"+f.haxe;}).join(", ") +"){");
       for (a in args_)
-        generatedCodeNew.push("    this."+a.name+" = "+a.name+";");
+        generatedCodeNew.push("    this."+a.name+" = "+a.name+"ToDB("+a.name+");");
 
       generatedCodeNew.push("    super();");
       generatedCodeNew.push(markers.end_new);
       generatedCodeNew.push("");
-
       // TODO think about defaults and constructor
 
       var lines = new Array();

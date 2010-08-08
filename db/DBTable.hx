@@ -396,29 +396,38 @@ class DBField implements IDBSerializable {
     return this;
   }
 
+  /* create field for SPOD
+  * having both: field and property having the same name works for PHP, neko, JS, Flash (10)
+  */
   function field(name:String, haxeType:String, guard:String,
       simple:Bool,
       ?raw:String // <- the HaXe type which the db values are read into.
       ){
 
-    var rawProperty = function(haxeType, getter, setter, propertyName, varname){
+    var getField = "Reflect.field(this,\""+name+"\")";
+    var setField = function(to:String){return "Reflect.setField(this,\""+name+"\","+to+")"; }
+
+    var rawProperty = function(haxeType, getter, setter, propertyName){
         return 
        "  public var "+propertyName+"("+getter+", "+setter+") : "+haxeType+";\n"+
        "  private function "+getter+"(): "+haxeType+" {\n"+
-       "     return "+varname+";\n"+
+       "     return "+getField+";\n"+
        "  }\n"+
        "  private function "+setter+"(value : "+haxeType+"): "+haxeType+" {\n"+
           guard +
-       "    if (value == "+varname+") return "+varname+";\n"+
+       "    if (value == "+getField+") return "+getField+";\n"+
        "    this.__dirty_data = true;\n"+
-       "    return "+varname+" = value;\n"+
+       "    "+setField("value")+";\n"+
+       "    return "+getField+";\n"+
        "  }\n";
     };
+
+    var field = "  private var "+name+": "+(raw == null ? haxeType : raw)+";\n";
     if (simple){
      // no transformation necessary
      return
-       "  private var _"+name+": "+haxeType+";\n"+
-       rawProperty(haxeType, "get"+name, "set"+name, name, "_"+name);
+       field
+       + rawProperty(haxeType, "get"+name+"DB", "set"+name+"DB", name+"DB");
     } else {
 
       // types are different - need transforrmation  such as Date String -> Date
@@ -430,20 +439,20 @@ class DBField implements IDBSerializable {
      var gt = "get"+name+"DBValue"; // getter setter
      var st = "set"+name+"DBValue";
      return
-       "  private var _"+name+": "+raw+";\n"+
-       "  public var "+name+"(get"+name+", set"+name+") : "+haxeType+";\n"+
-       "  private function get"+name+"(): "+haxeType+" {\n"+
-       "     return "+get("_"+name)+";\n"+
+       field +
+       "  public var "+name+"H(get"+name+"H, set"+name+"H) : "+haxeType+";\n"+
+       "  private function get"+name+"H(): "+haxeType+" {\n"+
+       "     return "+get(getField)+";\n"+
        "  }\n"+
-       "  private function set"+name+"(value : "+haxeType+"): "+haxeType+" {\n"+
+       "  private function set"+name+"H(value : "+haxeType+"): "+haxeType+" {\n"+
           guard +
        "    var v2 = "+set("value")+";\n"+
-       "    if (v2 == _"+name+") return "+get("_"+name)+";\n"+
+       "    if (v2 == "+getField+") return "+get(getField)+";\n"+
        "    this.__dirty_data = true;\n"+
-       "    _"+name+" = v2;\n"+
-       "    return "+get("_"+name)+";\n"+
+       "    "+setField("v2")+";\n"+
+       "    return "+get(getField)+";\n"+
        "  }\n"+
-       rawProperty(raw, gt, st, name+"DBValue", "_"+name);
+       rawProperty(raw, gt, st, name+"DB");
      }
   }
 
@@ -459,6 +468,9 @@ class DBField implements IDBSerializable {
 
     // put into new(..) constructor of SPOD?
     newArg: Bool,
+
+    // put value? into INSERT queries?
+    insert: Bool,
 
     // the "public var field: Field;" line
     // may also contain additional getter/ setter code (eg enum type)
@@ -478,6 +490,7 @@ class DBField implements IDBSerializable {
           haxeType: "String",
           haxeTypeRaw: "String",
           newArg: !__nullable,
+          insert: true,
           spodCode:
             field(name, "String",
             // TODO assume UTF-8?
@@ -493,6 +506,7 @@ class DBField implements IDBSerializable {
           haxeType: "Bool",
           haxeTypeRaw: "String",
           newArg: !__nullable,
+          insert: true,
           spodCode:
             field(name, "Bool", "", false, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):Bool { return (v == \"y\"); }\n"+ 
@@ -505,6 +519,7 @@ class DBField implements IDBSerializable {
           haxeType: "Int",
           haxeTypeRaw: "Int",
           newArg: !__nullable && d == null,
+          insert: d == null,
           spodCode:
             field(name, "Int", "", true)+
             "  static inline public function "+name+"ToHaXe(v: Int):Int { return v; }\n"+
@@ -517,6 +532,7 @@ class DBField implements IDBSerializable {
           haxeType: "String",
           haxeTypeRaw: "String",
           newArg: !__nullable,
+          insert: true,
           spodCode:
             field(name, "String", "", true)+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
@@ -530,6 +546,7 @@ class DBField implements IDBSerializable {
           haxeType: "Date",
           haxeTypeRaw: "String",
           newArg: !__nullable && (d == null || !d.__onInsert),
+          insert: (d == null || !d.__onInsert),
           spodCode:
             field(name, "Date", "", false, "String")+
             "  static inline public function "+name+"ToHaXe(v: String):Date { return Date.fromString(v); }\n"+
@@ -546,6 +563,7 @@ class DBField implements IDBSerializable {
           haxeType: "String",
           haxeTypeRaw: "String",
           newArg: !__nullable,
+          insert: true,
           spodCode:
             field(name, "String", "", true)+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
@@ -559,6 +577,7 @@ class DBField implements IDBSerializable {
           haxeType: e,
           haxeTypeRaw: "Int",
           newArg: !__nullable,
+          insert: true,
           spodCode:
             field(name, e, "", false, "Int")+
             "  static inline public function "+name+"ToHaXe(i:Int):"+e+"{ return Type.createEnumIndex("+e+", i); }\n"+

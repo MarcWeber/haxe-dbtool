@@ -58,6 +58,7 @@ class DBManager<T : DBObject> {
 	/* ---------------------------- BASIC API ----------------------------- */
 	var table_name : String;
 	var table_fields : Array<String>;
+	var table_fields_new : Array<String>;
 	var table_keys : Array<String>;
 	var class_proto : { prototype : Dynamic };
 	var lock_mode : Int;
@@ -124,6 +125,7 @@ class DBManager<T : DBObject> {
                 table_fields = tf.array();
 */
                 table_fields = cl.TABLE_FIELDS;
+                table_fields_new = cl.TABLE_FIELDS_NEW;
 
 		// set the manager and ready for further init
 		// proto.local_manager = this;
@@ -173,11 +175,19 @@ class DBManager<T : DBObject> {
 		return object(s.toString(),lock);
 	}
 
+        public function emptyInstance():T{
+                var t:T = Type.createEmptyInstance(cl);
+#if php
+                t.__initialize_class();
+#end
+                return t;
+        }
+
 	// implement this a second time for get ?
         public function getOrNewWithKeys( keys : {}, ?lock: Bool) : T {
 		var o = getWithKeys(keys, lock);
                 if (o == null){
-                  var o : T = Type.createEmptyInstance(cl);
+                  var o : T = emptyInstance();
                   o.__new = true;
 		  // assuming non autoincrement. So assign keys
 		  // if it is autoincrement keys will be overridden when
@@ -255,10 +265,10 @@ class DBManager<T : DBObject> {
 		unmake(x);
                 if (x.__new){
                 	// insert
-			cnx.insert(table_name, x, table_fields);
+			cnx.insert(table_name, x, table_fields_new);
 
 			if( table_keys.length == 1 && Reflect.field(x,table_keys[0]) == null ){
-                          Reflect.setField(x,"_"+table_keys[0],cnx.lastInsertId());
+                          Reflect.setField(x,table_keys[0],cnx.lastInsertId());
                         }
 			addToCache(x);
                 } else {
@@ -330,7 +340,7 @@ class DBManager<T : DBObject> {
                 return x;
 #elseif php
 
-		var o : T = Type.createEmptyInstance(cl);
+		var o : T = emptyInstance();
 
 		for(field in table_fields) {
 			Reflect.setField(o, field, Reflect.field(x, field));
@@ -389,9 +399,9 @@ class DBManager<T : DBObject> {
                                 return null;
                         var r = rs.next();
 
-                        var r = t.getFromCache(r,lock);
-                        if( r != null )
-                                return r;
+                        var c = t.getFromCache(r,lock);
+                        if( c != null )
+                                return c;
                         var r = t.cacheObject(r,lock);
                         r.__new = false;
                         t.make(r);

@@ -22,8 +22,12 @@ class DBObject {
     __new = true;
 #if php
     // only required for PHP?
-    local_manager = cast(DBManager.managers.get(Type.getClassName(Type.getClass(this))));
+    __initialize_class();
 #end
+  }
+
+  public inline function __initialize_class(){
+    local_manager = cast(DBManager.managers.get(Type.getClassName(Type.getClass(this))));
   }
 
   var local_manager : {

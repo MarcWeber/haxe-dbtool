@@ -14,7 +14,9 @@ TESTS="postgres_test mysql_test"
 for arg in "$@"; do
   case "$arg" in
     -d|--debug) set -x ;;
-    mysql|postgres) TESTS="${arg}_test"
+    mysql|postgres)
+      TESTS=
+      TESTS="${arg}_test"
     ;;
     --show-log)
       SHOW_LOG=1;
@@ -75,6 +77,13 @@ RUN(){
         cat log.txt
         exit 1
       fi
+
+      grep -e 'ERROR\|WARNING' log.txt 2>&1 && {
+        cat log.txt
+        echo "log.txt contains ERROR, WARNING! aborting"
+        exit 1
+      }
+
       [ -z "$SHOW_LOG" ] || cat log.txt
     ;;
     *)
@@ -84,7 +93,7 @@ RUN(){
 
 run(){
   local type=$1
-  args="-lib utest -cp ..  -main Test --php-front Test.php --remap neko:php -php php -cp generated-src "
+  args="-lib utest -cp .. -cp ../haxe-essentials -main Test --php-front Test.php --remap neko:php -php php -cp generated-src "
   for step in 1 2 3; do
     echo
     INFO ">> $type step $step"
