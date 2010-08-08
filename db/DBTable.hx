@@ -9,7 +9,7 @@ enum DBToolFieldType {
   db_bool;
   db_int;
   db_enum( valid_items: List<String> );
-  db_date;
+  db_datetime;
   db_text; // text field. arbitrary length. Maybe no indexing and slow searching
 
   // store ints instead of the named Enum. Provide getter and setters for enum
@@ -266,8 +266,8 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
     sql_after: Array<String>,     // eg setup trigger
     sql_remove: Array<String>,         // drop trigger and / or sequence
   } {
-    if (type != db_date)
-      throw "DBFDCurrentTimestmap only supports db_date fields!";
+    if (type != db_datetime)
+      throw "DBFDCurrentTimestmap only supports db_datetime fields!";
 
     switch (db_){
       case db_postgres:
@@ -538,7 +538,7 @@ class DBField implements IDBSerializable {
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
             "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
         };
-      case db_date:
+      case db_datetime:
         var d:DBFDCurrentTimestmap = cast(decoratorsOftype(DBFDCurrentTimestmap).first());
         // TODO
         return{ 
@@ -630,7 +630,7 @@ class DBField implements IDBSerializable {
             type = enumTypeName;
             field = [f.name+" "+type + " " + nullable +  merged.extraFieldText + references];
             merged.sql_before.push("CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(fun).join(",")+")");
-          case db_date:
+          case db_datetime:
              type = "timestamp";
              field = [f.name+" "+type+" " + nullable + merged.extraFieldText + references];
 
@@ -674,8 +674,9 @@ class DBField implements IDBSerializable {
           case db_enum(valid_items):
             var fun = function(x){ return "'"+x+"'"; };
             field = [f.name+" enum("+ valid_items.map(fun).join(",") +")" + nullable + merged.extraFieldText + references];
-          case db_date:
-            field = [f.name+" timestamp " + nullable + merged.extraFieldText + references];
+          case db_datetime:
+            var d:DBFDCurrentTimestmap = cast(f.decoratorsOftype(DBFDCurrentTimestmap).first());
+            field = [f.name+" "+(d == null ?  "datetime" : "timestamp" )+" " + nullable + merged.extraFieldText + references];
           case db_text:
             field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
           case db_haxe_enum_simple_as_index(e):

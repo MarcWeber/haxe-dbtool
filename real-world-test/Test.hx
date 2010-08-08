@@ -42,10 +42,11 @@ class Test {
         new DBField("man", db_bool).nullable(),
         new DBField("firstname", db_varchar(50)),
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
-        new DBField("registered", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+        new DBField("birthday", db_datetime),
+        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
 #if !db_mysql
         // see DBFDCurrentTimestmap
-        new DBField("changed", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+        new DBField("changed", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
 #end
       ]).className("SimpleAliased");
 #end
@@ -69,7 +70,7 @@ class Test {
         new DBField("firstname", db_varchar(50)),
 
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
-        new DBField("registered", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
 #end
 
 #if step3
@@ -170,7 +171,9 @@ class TestStep1 {
   public function new(){}
 
   function test() {
-    var u = new SimpleAliased("Marc", MyEnum.EA);
+    var d = new Date(2010, 1, 20, 1,2,3);
+    var u = new SimpleAliased("Marc", MyEnum.EA, d);
+
     try{
       // should throw Exception, because its too long
       Assert.equals(0,0);
@@ -185,7 +188,7 @@ class TestStep1 {
     var ids = new Array();
     var num = 3;
     for (x in 0 ... num){
-      ids.push(new SimpleAliased("firstname"+x, EA).store().idDB);
+      ids.push(new SimpleAliased("firstname"+x, EA, d).store().idDB);
     }
     // clear cache
     DBManager.cleanup();
@@ -194,6 +197,17 @@ class TestStep1 {
       var g = SimpleAliased.get(ids[x]);
       Assert.equals(g.firstnameDB, "firstname"+x);
       Assert.equals(g.myenumH, EA);
+      var d = g.birthdayH;
+      Assert.equals(d.getFullYear(), 2010);
+      Assert.equals(d.getMonth(), 1);
+      Assert.equals(d.getDate(), 20);
+      Assert.equals(d.getHours(), 1);
+      Assert.equals(d.getMinutes(), 2);
+      Assert.equals(d.getSeconds(), 3);
+
+      // insertion date should not be older than one minute
+      Assert.isTrue(Date.now().getTime() - g.registeredH.getTime() < 60 * 1000 ); 
+
     }
 
   }

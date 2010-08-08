@@ -78,9 +78,9 @@ RUN(){
         exit 1
       fi
 
-      grep -e 'ERROR\|WARNING' log.txt 2>&1 && {
+      grep -e 'ERROR\|WARNING\|FAILURE' log.txt 2>&1 && {
         cat log.txt
-        echo "log.txt contains ERROR, WARNING! aborting"
+        echo "log.txt contains ERROR, WARNING, FAILURE! aborting"
         exit 1
       }
 
