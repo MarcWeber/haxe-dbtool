@@ -8,37 +8,8 @@ using Lambda;
 using Std;
 
 /*
- 
-
-    var dbTool = new DBTool(cnx, {pathPrefix:"haxe/", fqn: ""}, "dbobjects");
-
-    // Postgres doesn't like a table named User, does it?
-    tables.addTable("User_", [], [
-        new DBField("oid", db_int),
-        new DBField("firstname", db_varchar(50)),
-        new DBField("lastname", db_varchar(50)),
-        new DBField("last_login", db_date),
-        new DBField("registered", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()])),
-        new DBField("changed", db_date, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()])),
-      ]).className("User");
-
-    tables.addTable("UserSubscription", [], [
-        new DBField("usr_oid", db_int).references("User","oid"),
-        new DBField("subscriptionTYpe", db_haxe_enum_simple_as_index(SubscriptionType))
-    ]);
-
-    // dbTool.prepareUpdate(); create a class with a function
-
-      public function scheme1(cnx:..){
-        /* create all tables or update them * /
-      }
-    // modify it so that it fits your needs. Eg adjust scheme updates etc.
-    // If that already exists the database scheme diff is written to scheme2(cnx:..)
-
-
-    // this executes all schemeNR functions which have not been run on this
-    // database yet:
-    dbTool.doUpdate();
+ *
+ * documentation see real-world-testcase
 
 */
 
@@ -139,6 +110,9 @@ class DBTool {
         generatedCode.push(haxe.spodCode);
       }
 
+      // table fields
+      generatedCode.push("  static var TABLE_FIELDS = ["+t.fields.map(function(s){ return "\""+s.name+"\""; }).join(", ")+"];");
+
       // primary keys
       if (t.primaryKeys.length > 0){
           generatedCode.push("  static var TABLE_IDS = ["+t.primaryKeys.map(function(s){ return "\""+s+"\""; }).join(", ")+"];");
@@ -166,6 +140,21 @@ class DBTool {
           generatedCode.push("  static var TABLE_NAME = \""+t.name+"\";");
 
 
+
+      // sync + store
+
+      generatedCode.push("   public function sync(): "+t.__SPODClassName+" {");
+      generatedCode.push("     local_manager.doSync(this);");
+      generatedCode.push("     return this;");
+      generatedCode.push("    }");
+      generatedCode.push("");
+      generatedCode.push("   public function store(): "+t.__SPODClassName+" {");
+      generatedCode.push("     local_manager.doStore(this);");
+      generatedCode.push("     return this;");
+      generatedCode.push("    }");
+      generatedCode.push("");
+
+
       generatedCode.push(markers.end);
 
       var generatedCodeNew = new Array();
@@ -178,9 +167,12 @@ class DBTool {
           }
         }).filter(function(f){ return f.newArg; });
       generatedCodeNew.push(markers.start_new);
+
       generatedCodeNew.push("  public function new("+ args_.map(function(f){return f.name+":"+f.haxe;}).join(", ") +"){");
       for (a in args_)
         generatedCodeNew.push("    this."+a.name+" = "+a.name+";");
+
+      generatedCodeNew.push("    super();");
       generatedCodeNew.push(markers.end_new);
       generatedCodeNew.push("");
 

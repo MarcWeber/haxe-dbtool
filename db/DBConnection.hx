@@ -1,4 +1,5 @@
 package db;
+import HE;
 import neko.db.Connection;
 
 using Type;
@@ -32,21 +33,20 @@ class DBConnection {
 
   // very simple form of placeholders {{{2
 
-  // run query quoted by susbtPH
-  public function requestPH(query:String, args:Array<Dynamic>){
-    return this.request(substPH(query, args));
-  }
-
   // substitute placeholders
   //   ? : quoted value
   //   ?v: insert string verbatim (without quoting)
   //   ?n: quote name (table or field name)
   //   ?l: quote list for use in  WHERE field IN (a,b,c)
+  //   ?w: {a:"abc", b:"foo"} yields a = "abc" AND b = "foo"
   //
   //   cnx.substPH("INSERT INSTO ?n VALUES (?,?,?v)", [ "table name", value1, value2.toString(), cnx.quote("a string")] )
   // note: the caller is responsible for converting a value into a string like
   //       thing which is understood by the database.
   public function substPH(query:String, args:Array<Dynamic>):String{
+    if (args == null)
+      return query;
+
     var parts = query.split("?");
     var s:StringBuf = new StringBuf();
     s.add(parts[0]);
@@ -108,7 +108,7 @@ class DBConnection {
     s.add(values.join(","));
     s.add(")");
 
-    return request(s.toString());
+    return execute(s.toString());
   }
 
   public function insertMany(table:String, list:Array<Dynamic>, ?fields: Array<String>){
@@ -142,7 +142,7 @@ class DBConnection {
     s.add(rows.join("),("));
     s.add(")");
 
-    request(s.toString());
+    execute(s.toString());
   }
 
   public function whereANDstr(l:Array<String>){
@@ -152,7 +152,10 @@ class DBConnection {
   // generate the WHERE part of a query using AND
   // example usage:
   // cnx.substPH("UPDATE foo SET abc = ? WHERE ?w ", [ 10, {name : "abc"} ] )
-  public function whereANDObj(o:Dynamic, ?fields: Array<String>){
+  public function whereANDObj(?o:Dynamic, ?fields: Array<String>){
+
+    if (o == null)
+      return "1 == 1";
 
     var names = (fields == null ) ? Reflect.fields(o) : fields;
 
@@ -179,7 +182,7 @@ class DBConnection {
 
   // cnx.delete("table",{id: "abc"});
   public function delete(table:String, o:Dynamic, ?fields: Array<String>){
-    request("DELETE FROM "+this.quoteName(table)+" WHERE "+this.whereANDObj(o, fields) );
+    execute("DELETE FROM "+this.quoteName(table)+" WHERE "+this.whereANDObj(o, fields) );
   }
 
   // example usage: cnx.update("users", {name: "A.B"}, null, {id: 10});
@@ -192,18 +195,64 @@ class DBConnection {
       sets.add(this.quoteName(n)+"="+Reflect.field(values,n));
     }
 
-    return request("UPDATE "+this.quoteName(table)+" WHERE "+this.whereANDObj(where, whereFields));
+    return execute("UPDATE "+this.quoteName(table)+" WHERE "+this.whereANDObj(where, whereFields));
   }
   // 
 
 
+  // QUERY INTERAFCE {{{
+
+  // force tidy up. a db query is that heavy compared to a function call - so
+  // the lambda does no longer matter
+  // close is not yet implemented
+
+  // get result from db
+  public function query<R>(s:String, withResult: DBResultSet -> R):R {
+    var resultSet = new DBResultSet(cnx.request(s), this);
+
+    return HE.tryFinally(function(){
+        return withResult(resultSet);
+    }, function(){
+      if (resultSet != null)
+        resultSet.free();
+    });
+  }
+
+  // return last insertId
+  public function execute(s:String){
+    cnx.request(s);
+  }
+
+  public function queryIntPH(s:String, ?args:Array<Dynamic>){
+    return this.queryPH(s, args, function(r){ return r.getIntResult(0); } );
+  }
+
+  public function queryStringPH(s:String, ?args:Array<Dynamic>){
+    return this.queryPH(s, args, function(r){ return r.getIntResult(0); } );
+  }
+
+  public function queryResults(query_:String, ?args:Array<Dynamic>):List<Dynamic>{
+    return this.queryPH(query_, args, function(r){ return r.results(); });
+  }
+
+  // run query quoted by susbtPH
+  public function queryPH<R>(query_:String, args:Array<Dynamic>, withResult:DBResultSet -> R):R{
+    return query(substPH(query_, args), withResult);
+  }
+
+  /*
+  // don't provide request, force users to use query which call free
   // make neko.db.Connection stuff available {{{
   public function request( s : String ){
     if (sqlLogger != null){
       sqlLogger(s);
     }
-    return new DBResultSet(cnx.request(s));
+    return new DBResultSet(cnx.request(s), this);
   }
+  */
+
+  // QUERY INTERAFCE END }}}
+
   public inline function close(){
     cnx.close();
   }

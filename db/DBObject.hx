@@ -1,6 +1,6 @@
 package db;
 import Reflect;
-// import db.DBManager;
+import db.DBManager;
 
 // this corresponds to neko.db.Object
 // all mapped ojbects should expand this interface
@@ -18,9 +18,17 @@ class DBObject {
   // new objcet? new objects have not been written to the database yet
   public var __new: Bool;
 
+  public function new() {
+    __new = true;
+#if php
+    // only required for PHP?
+    local_manager = cast(DBManager.managers.get(Type.getClassName(Type.getClass(this))));
+#end
+  }
+
   var local_manager : {
-    private function doStore( o : DBObject ) : Void;
-    private function doSync( o : DBObject ) : Void;
+    private function doStore( o : DBObject ) : DBObject;
+    private function doSync( o : DBObject ) : DBObject;
     private function doDelete( o : DBObject ) : Void;
     private function objectToString( o : DBObject ) : String;
   };
@@ -35,15 +43,6 @@ class DBObject {
   public var __dirty_data:Bool; // a field was changed
 
   // }}}
-
-
-  public function store() {
-    local_manager.doStore(this);
-  }
-
-  public function sync() {
-    local_manager.doSync(this);
-  }
 
   public function delete() {
     local_manager.doDelete(this);

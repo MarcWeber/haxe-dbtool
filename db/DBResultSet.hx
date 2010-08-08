@@ -4,9 +4,11 @@ package db;
 class DBResultSet implements neko.db.ResultSet{
 
   var set: php.db.ResultSet;
+  var conn: DBConnection;
 
-  public function new(resultSet: php.db.ResultSet) {
+  public function new(resultSet: php.db.ResultSet, conn: DBConnection) {
     this.set = resultSet;
+    this.conn = conn;
   }
 
   public function getIntCol():List<Int> {
@@ -55,4 +57,14 @@ class DBResultSet implements neko.db.ResultSet{
   public function getFloatResult( n : Int ) : Float{
     return set.getFloatResult(n);
   }
+
+  public function lastInsertId():Int {
+         return conn.lastInsertId();
+  }
+
+  public function free(){
+    if (Reflect.hasField(set, "free"))
+      Reflect.callMethod(set, "free", []);
+  }
+
 }

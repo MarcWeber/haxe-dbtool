@@ -28,6 +28,7 @@ using Lambda;
         implementations
 
 	- merged some code from PHP implementation. See #ifdef sections
+        - using static list in DBObject to determine table_fields.
 
 **/
 class DBManager<T : DBObject> {
@@ -38,6 +39,7 @@ class DBManager<T : DBObject> {
 	private static var init_list : List<DBManager<DBObject>> = new List();
 	private static var cache_field = "__cache__";
 	private static var LOCKS = ["","",""];
+	public static var managers = new Hash<DBManager<Dynamic>>();
 
 	private static function setConnection( c : DBConnection ) {
 		Reflect.setField(DBManager,"cnx",c);
@@ -82,6 +84,11 @@ class DBManager<T : DBObject> {
 		// apriv.push("local_manager");
 		apriv.push("__class__");
 
+/*
+                I don't want to maintain the reflection stuff at the moment -
+                using static field
+
+
 		// get the proto fields not marked private (excluding methods)
 		var tf = new List();
 
@@ -100,6 +107,7 @@ class DBManager<T : DBObject> {
 		}
 #else
 		TODO
+                PHP: see new() constructor and managers
 #end
 
 		for( f in instance_fields ) {
@@ -114,10 +122,17 @@ class DBManager<T : DBObject> {
 				tf.add(f);
 		}
                 table_fields = tf.array();
+*/
+                table_fields = cl.TABLE_FIELDS;
 
 		// set the manager and ready for further init
-		proto.local_manager = this;
+		// proto.local_manager = this;
 		init_list.add(cast this);
+
+		// set the manager and ready for further init
+
+		var clname = Type.getClassName(classval); // is this same as cname ?
+		managers.set(clname, this);
 	}
 
 	public function get( id : Int, ?lock : Bool ) : T {
@@ -219,12 +234,7 @@ class DBManager<T : DBObject> {
 	}
 
 	public function count( ?x : {} ) : Int {
-		var s = new StringBuf();
-		s.add("SELECT COUNT(*) FROM ");
-		s.add(table_name);
-		s.add(" WHERE ");
-		addCondition(s,x);
-		return execute(s.toString()).getIntResult(0);
+                return cnx.queryIntPH("SELECT COUNT(*) FROM t WHERE ?w", [x]);
 	}
 
 	public function quote( s : String ) : String {
@@ -232,23 +242,24 @@ class DBManager<T : DBObject> {
 	}
 
 	public function result( sql : String ) : Dynamic {
-		return cnx.request(sql).next();
+		return cnx.query(sql, function(r){return r.next();});
 	}
 
 	public function results<T>( sql : String ) : List<T> {
-		return cast cnx.request(sql).results();
+		return cast(cnx.queryResults(sql));
 	}
 
 	/* -------------------------- SPODOBJECT API -------------------------- */
 
-	function doStore( x : T ) {
+	function doStore( x : T ): DBObject {
 		unmake(x);
                 if (x.__new){
                 	// insert
 			cnx.insert(table_name, x, table_fields);
 
-			if( table_keys.length == 1 && Reflect.field(x,table_keys[0]) == null )
-				Reflect.setField(x,table_keys[0],cnx.lastInsertId());
+			if( table_keys.length == 1 && Reflect.field(x,table_keys[0]) == null ){
+                          Reflect.setField(x,"_"+table_keys[0],cnx.lastInsertId());
+                        }
 			addToCache(x);
                 } else {
                 	// update
@@ -257,10 +268,11 @@ class DBManager<T : DBObject> {
 				x.__dirty_data = false;
 			}
                 }
+                return x;
 	}
 
 
-	function doSync( i : T ) {
+	function doSync( i : T ): DBObject {
 		object_cache.remove(makeCacheKey(i));
 		var i2 = getWithKeys(i,!(cast i).__update );
 		// delete all fields
@@ -274,6 +286,13 @@ class DBManager<T : DBObject> {
 		// rebuild in case it's needed
 		make(i);
 		addToCache(i);
+                return i;
+	}
+
+
+	function doDelete( x : T ) {
+                cnx.delete(table_name, x, this.table_fields);
+		removeFromCache(x);
 	}
 
         /* where this used?
@@ -306,7 +325,7 @@ class DBManager<T : DBObject> {
 	function cacheObject( x : T, lock : Bool ): T {
 #if neko
 		addToCache(x);
-		untyped __dollar__objsetproto(x,class_proto.prototype);
+		// untyped __dollar__objsetproto(x,class_proto.prototype);
 		Reflect.setField(x,cache_field,untyped __dollar__new(x));
                 return x;
 #elseif php
@@ -344,10 +363,6 @@ class DBManager<T : DBObject> {
 		}
 	}
 
-	function execute( sql : String ) {
-		return cnx.request(sql);
-	}
-
 	function select( cond : String ) {
 		var s = new StringBuf();
 		s.add("SELECT * FROM ");
@@ -368,21 +383,25 @@ class DBManager<T : DBObject> {
 	}
 
 	public function object( sql : String, lock : Bool ) : T {
-		var r = cnx.request(sql).next();
-		if( r == null )
-			return null;
-		var c = getFromCache(r,lock);
-		if( c != null )
-			return c;
-		r = cacheObject(r,lock);
-		r.__new = false;
-		make(r);
-		return r;
+                var t = this;
+		return cnx.query(sql, function(rs){
+                        if( rs == null )
+                                return null;
+                        var r = rs.next();
+
+                        var r = t.getFromCache(r,lock);
+                        if( r != null )
+                                return r;
+                        var r = t.cacheObject(r,lock);
+                        r.__new = false;
+                        t.make(r);
+                        return r;
+                });
 	}
 
 	public function objects( sql : String, lock : Bool ) : List<T> {
 		var me = this;
-		var l = cnx.request(sql).results();
+		var l = cnx.query(sql, function(rs){ return rs.results(); } );
 		var l2 = new List<T>();
 		for( x in l ) {
 			var c = getFromCache(x,lock);
@@ -520,4 +539,3 @@ class DBManager<T : DBObject> {
 }
 
 // vim: sw=8,noexpandtab
-
