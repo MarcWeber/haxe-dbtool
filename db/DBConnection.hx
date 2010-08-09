@@ -229,7 +229,7 @@ class DBConnection {
   }
 
   public function queryStringPH(s:String, ?args:Array<Dynamic>){
-    return this.queryPH(s, args, function(r){ return r.getIntResult(0); } );
+    return this.queryPH(s, args, function(r){ return r.getResult(0); } );
   }
 
   public function queryResults(query_:String, ?args:Array<Dynamic>):List<Dynamic>{
