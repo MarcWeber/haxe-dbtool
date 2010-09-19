@@ -12,18 +12,16 @@ import utest.TestResult;
 import db.DBManager;
 
 #if !prepare
-#if db_postgres
-import DBUpdatePostgreSQL;
-#elseif db_mysql
-import DBUpdateMySQL;
-#else
-  TODO
-#end
 
-#if step1
-  import dbobjects.SimpleAliased;
-#end
-  import dbobjects.Simple2;
+  #if db_postgres
+  import DBUpdatePostgreSQL;
+  #elseif db_mysql
+  import DBUpdateMySQL;
+  #else
+    TODO
+  #end
+
+  import dbobjects.SPODS;
 #end
 
 class Test {
@@ -31,7 +29,7 @@ class Test {
   static public function dbTool(cnx): DBTool{
     var dbTool = new DBTool(cnx,
       {pathPrefix:"generated-src/", fqn: ""},
-      {pathPrefix:"generated-src/", pkg:"dbobjects"}
+      {pathPrefix:"generated-src/", fqn:"dbobjects.SPODS"}
     ).addImports(["Types"]);
 
 #if step1
