@@ -235,6 +235,16 @@ class DBConnection {
   public function execute(s:String){
     request(s);
   }
+  public function executePH(s:String, ?args:Array<Dynamic>){
+    request(substPH(s, args));
+  }
+
+  public function queryIntColPH(s:String, ?args:Array<Dynamic>){
+    return this.queryPH(s, args, function(r){ return r.getIntCol(); } );
+  }
+  public function queryStringColPH(s:String, ?args:Array<Dynamic>){
+    return this.queryPH(s, args, function(r){ return r.getCol(); } );
+  }
 
   public function queryIntPH(s:String, ?args:Array<Dynamic>){
     return this.queryPH(s, args, function(r){ return r.getIntResult(0); } );
