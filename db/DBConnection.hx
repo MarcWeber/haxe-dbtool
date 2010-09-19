@@ -1,5 +1,4 @@
 package db;
-import HE;
 import neko.db.Connection;
 
 using Type;
@@ -201,6 +200,19 @@ class DBConnection {
   // 
 
 
+  // this should be included in the compiler !
+  static public function tryFinally<R>(body: Void -> R, finally_: Void -> Void):R{
+    try {
+      var r = body();
+      finally_();
+      return r;
+    } catch(e:Dynamic){
+      finally_();
+      neko.Lib.rethrow(e);
+    }
+    return null;
+  }
+
   // QUERY INTERAFCE {{{
 
   // force tidy up. a db query is that heavy compared to a function call - so
@@ -211,7 +223,7 @@ class DBConnection {
   public function query<R>(s:String, withResult: DBResultSet -> R):R {
     var resultSet = new DBResultSet(request(s), this);
 
-    return HE.tryFinally(function(){
+    return tryFinally(function(){
         return withResult(resultSet);
     }, function(){
       if (resultSet != null)
