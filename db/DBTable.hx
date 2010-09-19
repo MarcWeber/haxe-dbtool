@@ -16,6 +16,12 @@ enum DBToolFieldType {
   // values. Take care when remving or replacing enum values. You have to
   // adjust the inedxes then
   db_haxe_enum_simple_as_index(e:String);
+
+  // serialize thing using haxe.Serializer and store string in database
+  db_serialized_varchar(type:String, varchar_size:Int);
+
+  // add db_serialized_text?
+  db_serialized_text(type:String);
 }
 
 enum DBEither<A,B> {
@@ -571,7 +577,6 @@ class DBField implements IDBSerializable {
 
         };
       case db_haxe_enum_simple_as_index(e):
-        var tE = name+"toEnum";
         return {
           dbType: "int",
           haxeType: e,
@@ -582,6 +587,30 @@ class DBField implements IDBSerializable {
             field(name, e, "", false, "Int")+
             "  static inline public function "+name+"ToHaXe(i:Int):"+e+"{ return Type.createEnumIndex("+e+", i); }\n"+
             "  static inline public function "+name+"ToDB(v: "+e+"):Int { return Type.enumIndex(v); }\n"
+        };
+      case db_serialized_varchar(type, varchar_size):
+        return {
+          dbType: "varchar("+varchar_size+")",
+          haxeType: type,
+          haxeTypeRaw: "String",
+          newArg: !__nullable,
+          insert: true,
+          spodCode:
+            field(name, type, "", false, "Int")+
+            "  static inline public function "+name+"ToHaXe(i:String):"+type+"{ return haxe.Unserializer.run("+type+", i); }\n"+
+            "  static inline public function "+name+"ToDB(v: "+type+"):String { return haxe.Serializer.run(v); }\n"
+        };
+      case db_serialized_text(type):
+        return {
+          dbType: "text",
+          haxeType: type,
+          haxeTypeRaw: "String",
+          newArg: !__nullable,
+          insert: true,
+          spodCode:
+            field(name, type, "", false, "Int")+
+            "  static inline public function "+name+"ToHaXe(i:String):"+type+"{ return haxe.Unserializer.run("+type+", i); }\n"+
+            "  static inline public function "+name+"ToDB(v: "+type+"):String { return haxe.Serializer.run(v); }\n"
         };
     }
 
@@ -644,6 +673,12 @@ class DBField implements IDBSerializable {
             var enumTypeName = tableName+"_"+f.name;
             var f = function(x){ return "'"+x+"'"; };
             merged.sql_remove.push("DROP TYPE "+enumTypeName);
+          case db_serialized_varchar(typeX, length):
+            type = "varchar("+length+")";
+            field = [f.name+" "+typeX+ " " + nullable + merged.extraFieldText + references];
+          case db_serialized_text(typeX):
+            type = "text";
+            field = [f.name+" "+typeX+" " + nullable + merged.extraFieldText + references];
         }
 
         var a = "ALTER "+f.name+" ";
@@ -681,6 +716,10 @@ class DBField implements IDBSerializable {
             field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
           case db_haxe_enum_simple_as_index(e):
             field = [f.name+" int" + nullable + merged.extraFieldText + references];
+          case db_serialized_varchar(typeX, length):
+            field = [f.name+" varchar("+length+")" + nullable + merged.extraFieldText + references];
+          case db_serialized_text(type):
+            field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
         }
 
         return {
@@ -803,7 +842,21 @@ class DBTable implements IDBSerializable {
   public var primaryKeys: Array<String>;
   public var name:String;
   public var fields: Array<DBField>;
-  public var __SPODClassName: String; // name of generated class
+
+  // property __SPODClassName  (name of generated class) {{{1
+  // ensure that the first character is upper case always
+  private var ___SPODClassName: String;
+  public var __SPODClassName(get__SPODClassName, set__SPODClassName) : String;
+  private function get__SPODClassName(): String { return ___SPODClassName;
+  }
+  private function set__SPODClassName(value : String): String
+  {
+    if (___SPODClassName == value) return ___SPODClassName;
+    value = value.charAt(0).toUpperCase()+value.substr(1);
+    return ___SPODClassName = value;
+  }
+  // }}}
+  
   public var __createSPODClass: Bool; // if true SPOD class file will be created or updated
 
   // TODO extend by keys etc
