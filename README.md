@@ -9,6 +9,11 @@ b) Then run tesh.sh mysql   or test.sh postgres
 There should be no errors. You should have new directory called generated-src.
 It contains both: SPOD objects and a class which creates / updates your database.
 
+== installation ==
+dependencies: haxe-sql (found on my github page)
+I recommend putting it into your haxelib/haxe-sql/999,9,9 directory and putting 999,9,9 into
+haxelib/haxe-sql/.current so that you can use it using the -lib haxe-sql flag
+
 == Description (no longer up to dote. But you get the idea faster)
 
 Example:
