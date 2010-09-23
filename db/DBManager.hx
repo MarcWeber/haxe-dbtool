@@ -95,8 +95,6 @@ class DBManager<T : DBObject> {
 
 // this code should be present in reflection API?
 #if neko
-		var proto : { local_manager : DBManager<T> } = class_proto.prototype;
-		var instance_fields = Reflect.fields(proto)
 #elseif php
 		var proto = Type.createEmptyInstance(cl);
 		var instance_fields = Type.getInstanceFields(cl);
@@ -107,8 +105,6 @@ class DBManager<T : DBObject> {
 			scls = Type.getSuperClass(scls);
 		}
 #else
-		TODO
-                PHP: see new() constructor and managers
 #end
 
 		for( f in instance_fields ) {
@@ -128,7 +124,11 @@ class DBManager<T : DBObject> {
                 table_fields_new = cl.TABLE_FIELDS_NEW;
 
 		// set the manager and ready for further init
-		// proto.local_manager = this;
+#if neko
+		var proto : { local_manager : DBManager<T> } = class_proto.prototype;
+		proto.local_manager = this;
+                // PHP (and others?) see new constructor in managers
+#end
 		init_list.add(cast this);
 
 		// set the manager and ready for further init
@@ -333,12 +333,13 @@ class DBManager<T : DBObject> {
 	/* ---------------------------- INTERNAL API -------------------------- */
 
 	function cacheObject( x : T, lock : Bool ): T {
-#if neko
-		addToCache(x);
-		// untyped __dollar__objsetproto(x,class_proto.prototype);
-		Reflect.setField(x,cache_field,untyped __dollar__new(x));
-                return x;
-#elseif php
+// this does not work with properties!
+// #if neko
+// 		addToCache(x);
+// 		// untyped __dollar__objsetproto(x,class_proto.prototype);
+// 		Reflect.setField(x,cache_field,untyped __dollar__new(x));
+//                 return x;
+// #end
 
 		var o : T = emptyInstance();
 
@@ -348,7 +349,6 @@ class DBManager<T : DBObject> {
 		addToCache(o);
 
                 return o;
-#end
 	}
 
 	function make( x : T ) {

@@ -17,6 +17,8 @@ import db.DBManager;
   import DBUpdatePostgreSQL;
   #elseif db_mysql
   import DBUpdateMySQL;
+  #elseif db_sqlite
+  import DBUpdateSQLite;
   #else
     TODO
   #end
@@ -41,10 +43,10 @@ class Test {
         new DBField("firstname", db_varchar(50)),
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
         new DBField("birthday", db_datetime),
-        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap() #if !db_sqlite .onUpdate() #end .onInsert()]) ),
 #if !db_mysql
         // see DBFDCurrentTimestmap
-        new DBField("changed", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+        new DBField("changed", db_datetime, cast([ new DBFDCurrentTimestmap() #if !db_sqlite .onUpdate() #end .onInsert()]) ),
 #end
       ]).className("SimpleAliased");
 #end
@@ -55,21 +57,26 @@ class Test {
     // in step 3 remove fields again but man and firstname. change type (remove nullable, change length)
     dbTool.addTable("Simple2", 
         [
-#if step2
+#if (step2 || db_sqlite)
         "id"
 #end
         ],
         [
         new DBField("dummy", db_varchar(4)),
+
+        // sqlite does not supporting adding a primary key, so do it before step2 in this case
+        #if db_sqlite new DBField("id", db_int).autoinc(), #end
 #if step2
-        new DBField("id", db_int).autoinc(),
+        #if !db_sqlite new DBField("id", db_int).autoinc(), #end
 
         new DBField("man", db_bool).nullable(),
         new DBField("firstname", db_varchar(50)),
 
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
-        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ),
+        #if !db_sqlite new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ), #end
 #end
+        // SQL can't add this column with CURRENT_TIMESTAMP = default(..,'localtime'), so do it in step1 when table is created
+        #if db_sqlite new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ), #end
 
 #if step3
         new DBField("man", db_bool), // no more .nullable
@@ -104,8 +111,12 @@ class Test {
       case "postgres":
         dbType = db_postgres;
         var lines = neko.io.File.getContent("postgres-connection.txt").split("\n");
-        cnx = new DBConnection(php.db.Postgresql.open("dbname="+lines[0]+" user="+lines[1]+" password="+lines[2]+" "
+        cnx = new DBConnection(neko.db.Postgresql.open("dbname="+lines[0]+" user="+lines[1]+" password="+lines[2]+" "
                       +(lines[3] == "" ? "" : "host="+lines[3]+" port="+lines[4]) ));
+      case "sqlite":
+        dbType = db_sqlite;
+        var lines = neko.io.File.getContent("sqlite-connection.txt").split("\n");
+        cnx = new DBConnection(neko.db.Sqlite.open(lines[0]));
       default:
         throw "unexpected first argument";
     }
@@ -204,8 +215,8 @@ class TestStep1 {
       Assert.equals(d.getSeconds(), 3);
 
       // insertion date should not be older than one minute
+      trace(">>> "+g.registeredDB+" "+g.registeredH);
       Assert.isTrue(Date.now().getTime() - g.registeredH.getTime() < 60 * 1000 ); 
-
     }
 
   }

@@ -6,9 +6,19 @@ using Lambda;
 
 enum DBToolFieldType {
   db_varchar( length: Int ); // assuming String is UTF-8
+  /* 
+    always stored as 'y' 'n' (varchar(1)) or enum('y','n') (Mysql)
+    Reason: Postgresql has native bool type, SQLite uses 0 / 1.
+    If if we force using y/n as bool type your code will be portable.
+  */
   db_bool;
   db_int;
-  db_enum( valid_items: List<String> );
+  /* enums = allow a list of values
+    mysql: native enum
+    postgresql: CREATE TYPE ... AS ENUM
+    sqlite: does not support enums. Thus varchar is being used
+  */
+  db_enum( valid_items: Array<String> );
   db_datetime;
   db_text; // text field. arbitrary length. Maybe no indexing and slow searching
 
@@ -33,7 +43,7 @@ enum DBEither<A,B> {
 enum DBSupportedDatabaseType {
   db_mysql;
   db_postgres;
-  // db_sqlite;
+  db_sqlite;
 }
 
 interface IDBSerializable {
@@ -138,9 +148,15 @@ class DBFDComment extends DBFieldDecorator {
           sql_before : [],
           sql_after: [],
           sql_remove: []
-
         }
       case db_mysql:
+        return {
+          extraFieldText : "COMMENT \""+__comment+"\"",
+          sql_before : [],
+          sql_after: [],
+          sql_remove: []
+        }
+      case db_sqlite:
         return {
           extraFieldText : "COMMENT \""+__comment+"\"",
           sql_before : [],
@@ -189,6 +205,13 @@ class DBFDIndex extends DBFieldDecorator {
           sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
           sql_remove: droppingTable || droppingField ? [] : ["ALTER TABLE "+tableName+" DROP INDEX IF EXISTS "+index_name]
         }
+      case db_sqlite:
+        return {
+          extraFieldText : "",
+          sql_before : [],
+          sql_after: ["CREATE "+(__uniq ? "UNIQUE" : "" )+" INDEX "+index_name+" ON "+tableName+"("+field+")"],
+          sql_remove: droppingTable || droppingField ? [] : ["DROP INDEX IF EXISTS "+index_name]
+        }
     }
   }
 }
@@ -227,6 +250,13 @@ class DBFDAutoinc extends DBFieldDecorator {
       case db_mysql:
         return {
           extraFieldText : " auto_increment key ",
+          sql_before : [],
+          sql_after: [],
+          sql_remove: []
+        }
+      case db_sqlite:
+        return {
+          extraFieldText : " primary key autoincrement ",
           sql_before : [],
           sql_after: [],
           sql_remove: []
@@ -319,6 +349,28 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
           sql_after: [],
           sql_remove: []
         }
+      case db_sqlite:
+        return {
+          extraFieldText : (__onInsert ? 
+#if TIMESTAMPS_IN_GMT
+                            " default CURRENT_TIMESTAMP "
+#else
+                            " default (datetime('now','localtime')) "
+#end
+                            : ""),
+          sql_before : [],
+          sql_after: 
+            /* somehting like this. Don't have primary key. I don't need it
+            __onUpdate ? ["
+              CREATE TRIGGER update_timestamp_"+tableName+"_"+field+" AFTER UPDATE ON "+tableName+"
+              BEGIN
+                UPDATE "+tableName+" SET "+field+" = DATETIME('NOW') WHERE rowid = new.rowid;
+              END;
+            "] : [],
+            */
+            [],
+          sql_remove: []
+        }
     }
       
   }
@@ -330,6 +382,7 @@ class DBFDCurrentTimestmap extends DBFieldDecorator {
 class DBField implements IDBSerializable {
 
   public var name: String;
+  public var __default: Null<String>; // this should be Dynamic - but for now you have to use the db representation yourself ..
   public var type: DBToolFieldType;
   public var __references: Null<{table: String, field: String}>;
   public var __nullable: Bool;
@@ -365,6 +418,7 @@ class DBField implements IDBSerializable {
   // }}}
 
   public function new(name: String, type:DBToolFieldType, ?decorators:Array<DBFieldDecorator>){
+    this.__default = null;
     this.name = name;
     this.type = type;
     this.__nullable = false;
@@ -379,6 +433,11 @@ class DBField implements IDBSerializable {
 
   public function nullable(){
     __nullable = true;
+    return this;
+  }
+
+  public function defaultValue(default_:String) {
+    this.__default = default_;
     return this;
   }
 
@@ -515,7 +574,7 @@ class DBField implements IDBSerializable {
           insert: true,
           spodCode:
             field(name, "Bool", "", false, "String")+
-            "  static inline public function "+name+"ToHaXe(v: String):Bool { return (v == \"y\"); }\n"+ 
+            "  static inline public function "+name+"ToHaXe(v: String):Bool { return v == \"y\"; }\n"+ 
             "  static inline public function "+name+"ToDB(v: Bool):String { return v ? \"y\" : \"n\"; }\n"
         };
       case db_int:
@@ -542,7 +601,7 @@ class DBField implements IDBSerializable {
           spodCode:
             field(name, "String", "", true)+
             "  static inline public function "+name+"ToHaXe(v: String):String { return v; }\n"+
-            "  static inline public function "+name+"ToDB(v: String):String { return v; }\n"
+            "  static inline public function "+name+"ToDB(v: String):String { if (!Lambda.has(["+valid_items.map(function(x){ return "\""+x+"\""; }).join(",")+"], v) throw \"invalid enum value: \"+v+\". Expected one of "+valid_items.join(",")+"\" ; return v; }\n"
         };
       case db_datetime:
         var d:DBFDCurrentTimestmap = cast(decoratorsOftype(DBFDCurrentTimestmap).first());
@@ -598,7 +657,7 @@ class DBField implements IDBSerializable {
           spodCode:
             field(name, type, "", false, "Int")+
             "  static inline public function "+name+"ToHaXe(i:String):"+type+"{ return haxe.Unserializer.run("+type+", i); }\n"+
-            "  static inline public function "+name+"ToDB(v: "+type+"):String { return haxe.Serializer.run(v); }\n"
+            "  static inline public function "+name+"ToDB(v: "+type+"):String { var s = haxe.Serializer.run(v); if (s.length > "+varchar_size+") throw \"serialized representation of object does not fit in field "+name+" of type varchar"+varchar_size+"\"; return s; }\n"
         };
       case db_serialized_text(type):
         return {
@@ -634,6 +693,14 @@ class DBField implements IDBSerializable {
         sql_remove : Array<String> // remove what sql_before, sql_after added to the database
     }{
 
+    // sqlite requires a default value if NOT NULL
+    var def = function(default_, extras){
+      var d = f.__default == null ? default_ : f.__default;
+      var ex = (!~/default/.match(extras) && d != null)
+        ? "default "+d+" " : "";
+      return ex + extras;
+    };
+
     switch (db_){
       case db_postgres: // {{{
         var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable, droppingField);
@@ -646,39 +713,39 @@ class DBField implements IDBSerializable {
         switch (f.type){
           case db_varchar(length):
             type = "varchar("+length+")";
-            field = [f.name+" "+type+ " " + nullable + merged.extraFieldText + references];
+            field = [f.name+" "+type+ " " + nullable + def(null, merged.extraFieldText) + references];
           case db_bool:
             type = "bool";
-            field = [f.name+" "+type+" " + nullable +  merged.extraFieldText + references];
+            field = [f.name+" "+type+" " + nullable +  def(null, merged.extraFieldText) + references];
           case db_int:
             type = "int";
-            field = [f.name+" "+ type + " " + nullable +  merged.extraFieldText + references];
+            field = [f.name+" "+ type + " " + nullable +  def(null, merged.extraFieldText) + references];
           case db_enum(valid_items):
             var fun = function(x){ return "'"+x+"'"; };
             var enumTypeName = tableName+"_"+f.name;
             type = enumTypeName;
-            field = [f.name+" "+type + " " + nullable +  merged.extraFieldText + references];
+            field = [f.name+" "+type + " " + nullable +  def(null, merged.extraFieldText) + references];
             merged.sql_before.push("CREATE TYPE "+enumTypeName+ " AS ENUM ("+valid_items.map(fun).join(",")+")");
           case db_datetime:
              type = "timestamp";
-             field = [f.name+" "+type+" " + nullable + merged.extraFieldText + references];
+             field = [f.name+" "+type+" " + nullable + def(null, merged.extraFieldText) + references];
 
           case db_text:
              type = "text";
-            field = [f.name+" "+type+" " + nullable + merged.extraFieldText + references];
+            field = [f.name+" "+type+" " + nullable + def(null, merged.extraFieldText) + references];
 
           case db_haxe_enum_simple_as_index(e):
             type = "int";
-            field = [f.name+" "+type+" " + nullable +  merged.extraFieldText + references];
+            field = [f.name+" "+type+" " + nullable +  def(null, merged.extraFieldText) + references];
             var enumTypeName = tableName+"_"+f.name;
             var f = function(x){ return "'"+x+"'"; };
             merged.sql_remove.push("DROP TYPE "+enumTypeName);
           case db_serialized_varchar(typeX, length):
             type = "varchar("+length+")";
-            field = [f.name+" "+typeX+ " " + nullable + merged.extraFieldText + references];
+            field = [f.name+" "+typeX+ " " + nullable + def(null, merged.extraFieldText) + references];
           case db_serialized_text(typeX):
             type = "text";
-            field = [f.name+" "+typeX+" " + nullable + merged.extraFieldText + references];
+            field = [f.name+" "+typeX+" " + nullable + def(null, merged.extraFieldText) + references];
         }
 
         var a = "ALTER "+f.name+" ";
@@ -701,25 +768,65 @@ class DBField implements IDBSerializable {
         var field:Array<String>;
         switch (f.type){
           case db_varchar(length):
-            field = [f.name+" varchar("+length+")" + nullable + merged.extraFieldText + references];
+            field = [f.name+" varchar("+length+")" + nullable + def(null, merged.extraFieldText) + references];
           case db_bool:
              field = [f.name+" enum('y','n')"];
           case db_int:
-            field = [f.name+" int" + nullable + merged.extraFieldText + references];
+            field = [f.name+" int" + nullable + def(null, merged.extraFieldText) + references];
           case db_enum(valid_items):
             var fun = function(x){ return "'"+x+"'"; };
-            field = [f.name+" enum("+ valid_items.map(fun).join(",") +")" + nullable + merged.extraFieldText + references];
+            field = [f.name+" enum("+ valid_items.map(fun).join(",") +")" + nullable + def(null, merged.extraFieldText) + references];
           case db_datetime:
             var d:DBFDCurrentTimestmap = cast(f.decoratorsOftype(DBFDCurrentTimestmap).first());
-            field = [f.name+" "+(d == null ?  "datetime" : "timestamp" )+" " + nullable + merged.extraFieldText + references];
+            field = [f.name+" "+(d == null ?  "datetime" : "timestamp" )+" " + nullable + def(null, merged.extraFieldText) + references];
           case db_text:
-            field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
+            field = [f.name+" longtext" + nullable + def(null, merged.extraFieldText) + references];
           case db_haxe_enum_simple_as_index(e):
-            field = [f.name+" int" + nullable + merged.extraFieldText + references];
+            field = [f.name+" int" + nullable + def(null, merged.extraFieldText) + references];
           case db_serialized_varchar(typeX, length):
-            field = [f.name+" varchar("+length+")" + nullable + merged.extraFieldText + references];
+            field = [f.name+" varchar("+length+")" + nullable + def(null, merged.extraFieldText) + references];
           case db_serialized_text(type):
-            field = [f.name+" longtext" + nullable + merged.extraFieldText + references];
+            field = [f.name+" longtext" + nullable + def(null, merged.extraFieldText) + references];
+        }
+
+        return {
+          fields: field,
+          alter: field.map(function(fx){ return "CHANGE "+f.name+" "+fx; }).array(),
+          fieldNames: [ f.name ],
+          sql_before : merged.sql_before,
+          sql_after  : merged.sql_after,
+          sql_remove : merged.sql_remove
+        };
+      // }}}
+
+      case db_sqlite: // {{{
+        // TODO test this
+
+        var merged = DBFieldDecorator.merge(db_, f.type, tableName, f.name, f.__decorators, droppingTable, droppingField);
+        var nullable = (f.__nullable) ? "" : " NOT NULL ";
+        var references = ( f.__references == null ) ? "": " REFERENCES " + f.__references.table + "("+ f.__references.field + ")";
+        var field:Array<String>;
+        switch (f.type){
+          case db_varchar(length):
+            field = [f.name+" varchar("+length+")" + nullable + def("\"\"", merged.extraFieldText) + references];
+          case db_bool:
+             field = [f.name+" INTEGER"];
+          case db_int:
+            field = [f.name+" INTEGER" + nullable + def("0", merged.extraFieldText) + references];
+          case db_enum(valid_items):
+            var length = valid_items.fold(function(n, max){ var l = n.length; return l > max ? l : max; }, 0);
+            field = [f.name+" varchar("+length+")" + nullable + def("\""+valid_items[0]+"\"", merged.extraFieldText) + references];
+          case db_datetime:
+            var d:DBFDCurrentTimestmap = cast(f.decoratorsOftype(DBFDCurrentTimestmap).first());
+            field = [f.name+" "+(d == null ?  "datetime" : "timestamp" )+" " + nullable + def("\"2000-00-00 00:00:0\"", merged.extraFieldText) + references];
+          case db_text:
+            field = [f.name+" longtext" + nullable + def("\"\"", merged.extraFieldText) + references];
+          case db_haxe_enum_simple_as_index(e):
+            field = [f.name+" INTEGER" + nullable + def("\"\"", merged.extraFieldText) + references];
+          case db_serialized_varchar(typeX, length):
+            field = [f.name+" varchar("+length+")" + nullable + def("\"\"", merged.extraFieldText) + references];
+          case db_serialized_text(type):
+            field = [f.name+" longtext" + nullable + def("\"\"", merged.extraFieldText) + references];
         }
 
         return {
@@ -805,16 +912,32 @@ class DBField implements IDBSerializable {
       var setup_differ = (old__code.sql_after != new__code.sql_after)
                       || (old__code.sql_before != new__code.sql_before);
 
+      var needs_drop = switch (db_){
+        case db_mysql: false;
+        case db_postgres: false;
+        // db_sqlite does not have ALTER TABLE .. CHANGE
+        // FIELD or the like. So drop old, then create new field.
+        // If you want to keep values add the copy commands
+        // manually - Well there is no DROP :-( So this does not work
+        // I'll delay implementation until I need it
+        case db_sqlite: true;
+      }
+
       var changeFields = new Array<String>();
       if (old__code.fields.length == new__code.fields.length){
         for (i in 0 ... old__code.fields.length){
           var n = old__code.fieldNames[i];
           if (old__code.fields[i] != new__code.fields[i])
-            changeFields.push("ALTER TABLE "+tableName+" "+new__code.alter[i]);
+            if (needs_drop){
+              changeFields.push("ALTER TABLE "+tableName+" DROP "+old__code.fieldNames[i]);
+              changeFields.push("ALTER TABLE "+tableName+" ADD  "+new__code.fields[i]);
+            } else {
+              changeFields.push("ALTER TABLE "+tableName+" "+new__code.alter[i]);
+            }
         }
       } else {
         // drop old
-        for (o in old__code.fields)
+        for (o in old__code.fieldNames)
           changeFields.push("ALTER TABLE "+tableName+" DROP "+o);
         // create new
         for (n in new__code.fields)
@@ -919,6 +1042,7 @@ class DBTable implements IDBSerializable {
       if (r.sql_after != null)
         requests = requests.concat(r.sql_after);
     }
+    // both MySQL and SQLite allow only one auto inc field which must be the primary key
     var mysql_primary_included = function(x:DBTable){
       var autoInc = x.autoincField();
 
@@ -956,12 +1080,12 @@ class DBTable implements IDBSerializable {
         "CREATE TABLE "+new_.name+ "(\n"
         + fields +"\n"
         + primary_key
-        +");\n");
+        +")\n");
       requests = requests.concat(after);
     }
 
     var drop_table = function(){
-      requests.push( "DROP TABLE "+old.name+ ";" );
+      requests.push( "DROP TABLE "+old.name);
       // possible cleanups (remove enum types ?)
       for (f in old.fields){
         var r = DBField.toSQL(db_, old.name, f, null, true);
@@ -1037,11 +1161,44 @@ class DBTable implements IDBSerializable {
           for (o in changeSets.o){ pushAll(false, DBField.toSQL(db_, new_.name, o, null, false)); }
 
           if (old.primaryKeys != new_.primaryKeys){
-            trace("A");
             if (old.primaryKeys.length > 0 && !mysql_primary_included(old))
               requests.push("ALTER TABLE "+old.name+" DROP KEY "+old.name+"_pkey");
 
-            trace("B");
+            if (new_.primaryKeys.length > 0 && !mysql_primary_included(new_))
+              requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
+          }
+
+        }
+      // Sqlite case {{{2
+      case db_sqlite:
+        // TODO test this
+
+        if (old == null){
+          // create table
+          create_table();
+
+
+        } else if (new_ == null){
+          // drop table
+          drop_table();
+
+        } else {
+          // change table
+
+          if (old.name != new_.name)
+            throw "changing names not implemnted yet!";
+
+          var changeSets = DBHelper.sep( old == null ? new Array() : old.fields
+                        , new_ == null ? new Array() : new_.fields );
+
+          for (n in changeSets.n){ pushAll(true, DBField.toSQL(db_, new_.name, null, n, false)); }
+          for (k in changeSets.k){ pushAll(false, DBField.toSQL(db_, new_.name, k.o, k.n, false)); }
+          for (o in changeSets.o){ pushAll(false, DBField.toSQL(db_, new_.name, o, null, false)); }
+
+          if (old.primaryKeys != new_.primaryKeys){
+            if (old.primaryKeys.length > 0 && !mysql_primary_included(old))
+              requests.push("ALTER TABLE "+old.name+" DROP KEY "+old.name+"_pkey");
+
             if (new_.primaryKeys.length > 0 && !mysql_primary_included(new_))
               requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
           }

@@ -6,17 +6,24 @@
 # lines must fit values, see [1] and [2].
 # Then bash test.sh or such.
 
+# rewrite this test script in HaXe?
 
 set -e
 
-TESTS="postgres_test mysql_test"
+TESTS="postgres_test mysql_test sqlite_test"
+BACKENDS="neko php"
+
+die(){ echo "$@"; exit 1; }
 
 for arg in "$@"; do
   case "$arg" in
     -d|--debug) set -x ;;
-    mysql|postgres)
+    mysql|postgres|sqlite)
       TESTS=
       TESTS="${arg}_test"
+    ;;
+    neko|php)
+      BACKENDS="$arg"
     ;;
     --show-log)
       SHOW_LOG=1;
@@ -27,14 +34,18 @@ for arg in "$@"; do
       -h or --help: print this usage
       postgres:  run Postgresql test only
       mysql:     run MySQL test only
+      sqlite:    run Sqlite test only (experimental)
+
+      php:  test php backend only
+      neko: test neko backend only
+
       -d:        set -x
       --show-log
 EOF
-      exit 1
+      die
     ;;
     *) 
-      echo "unexpected arg: $arg";
-      exit 1
+      die "unexpected arg: $arg";
     ;;
   esac
 done
@@ -58,42 +69,34 @@ HAXE(){
   haxe "$@" || {
     echo "compilation failed"
     echo "compilation flags have been written to current.hxml"
-    exit 1
+    die
   }
 }
  
 RUN(){
-  local target=$1; shift
+  $RUN_BACKEND_CMD "$@" &> log.txt || {
+    echo "backend exited nonzero ?"
+    cat log.txt
+    die
+  }
+  if grep \#1 log.txt &> /dev/null; then
+    echo "exception running Test"
+    cat log.txt
+    die
+  fi
 
-  case "$target" in
-    php)
-      php php/Test.php "$@" &> log.txt || {
-        echo "php exited nonzero ?"
-        cat log.txt
-        exit 1
-      }
-      if grep \#1 log.txt &> /dev/null; then
-        echo "exception running Test"
-        cat log.txt
-        exit 1
-      fi
+  grep -e 'ERROR\|WARNING\|FAILURE' log.txt 2>&1 && {
+    cat log.txt
+    echo "log.txt contains ERROR, WARNING, FAILURE! aborting"
+    die
+  }
 
-      grep -e 'ERROR\|WARNING\|FAILURE' log.txt 2>&1 && {
-        cat log.txt
-        echo "log.txt contains ERROR, WARNING, FAILURE! aborting"
-        exit 1
-      }
-
-      [ -z "$SHOW_LOG" ] || cat log.txt
-    ;;
-    *)
-    ;;
-  esac
+  [ -z "$SHOW_LOG" ] || cat log.txt
 }
 
 run(){
   local type=$1
-  args="-lib utest -cp .. -cp ../haxe-essentials -main Test --php-front Test.php --remap neko:php -php php -cp generated-src "
+  args="-lib utest -lib haxe-sql -cp .. -cp ../haxe-essentials $HAXE_BACKEND_FLAGS -cp generated-src "
   for step in 1 2 3; do
     echo
     INFO ">> $type step $step"
@@ -101,14 +104,14 @@ run(){
     INFO "compile so that prepare can be run"
     HAXE $args -D step${step} -D prepare -D db_$type
     INFO "preparing (generating code)"
-    RUN php $type $step prepare
+    RUN $type $step prepare
     INFO "compile generated code"
     HAXE $args -D step${step} -D db_$type
     INFO "updating database (running gerenated code)"
-    RUN php $type $step update
+    RUN $type $step update
 
     INFO "running tests on this scheme $step"
-    RUN php $type $step test
+    RUN $type $step test
   done
 }
 
@@ -134,6 +137,12 @@ mysql_test()
 
 }
 
+sqlite_test()
+{
+  rm sqlite.db || true
+  run sqlite
+}
+
 postgres_test()
 {
   INFO "testing Postgresql"
@@ -155,6 +164,21 @@ postgres_test()
   run postgres
 }
 
-for t in $TESTS; do
-  $t
+for backend in $BACKENDS; do
+  case "$backend" in
+    php)
+      HAXE_BACKEND_FLAGS="-main Test --php-front Test.php --remap neko:php -php php"
+      RUN_BACKEND_CMD="php php/Test.php"
+    ;;
+    neko)
+      HAXE_BACKEND_FLAGS="-debug -lib haxe-sql -main Test -neko Test.n"
+      RUN_BACKEND_CMD="neko Test.n"
+    ;;
+    *)
+      die "unkown backend"
+    ;;
+  esac
+  for t in $TESTS; do
+    $t
+  done
 done

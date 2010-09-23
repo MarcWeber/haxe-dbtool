@@ -46,6 +46,7 @@ class DBTool {
     this.dbType = switch (dbName){
       case "PostgreSQL": db_postgres;
       case "MySQL": db_mysql;
+      case "SQLite": db_sqlite;
       default:
         throw "can't match "+dbName+" against neither: PostgreSQL, MySQL";
     }
@@ -497,7 +498,8 @@ class DBTool {
     } else {
       for (scheme in (max_db+1 ... max+1)){
         info("updating to "+scheme);
-        Reflect.callMethod(c, "scheme"+scheme, [db_]);
+        // Reflect.callMethod(null, Reflect.field(c, "scheme"+scheme)(db_)
+        Reflect.field(c, "scheme"+scheme)(db_);
         info("done. scheme is "+scheme);
       }
     }

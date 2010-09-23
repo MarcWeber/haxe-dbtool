@@ -22,6 +22,7 @@ class DBObject {
     __new = true;
 #if php
     // only required for PHP?
+    // I think neko has better way to do this?
     __initialize_class();
 #end
   }
