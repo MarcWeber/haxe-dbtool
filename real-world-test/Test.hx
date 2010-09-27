@@ -43,10 +43,11 @@ class Test {
         new DBField("firstname", db_varchar(50)),
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
         new DBField("birthday", db_datetime),
-        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap() #if !db_sqlite .onUpdate() #end .onInsert()]) ),
+        // sqlite 3.* supports onInsert, but, but 2.7 does not
+        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap() #if !db_sqlite .onUpdate() .onInsert() #end ]) ),
 #if !db_mysql
         // see DBFDCurrentTimestmap
-        new DBField("changed", db_datetime, cast([ new DBFDCurrentTimestmap() #if !db_sqlite .onUpdate() #end .onInsert()]) ),
+        new DBField("changed", db_datetime, cast([ new DBFDCurrentTimestmap() #if !db_sqlite .onUpdate() .onInsert() #end ]) ),
 #end
       ]).className("SimpleAliased");
 #end
@@ -57,26 +58,22 @@ class Test {
     // in step 3 remove fields again but man and firstname. change type (remove nullable, change length)
     dbTool.addTable("Simple2", 
         [
-#if (step2 || db_sqlite)
+#if (step2)
         "id"
 #end
         ],
         [
         new DBField("dummy", db_varchar(4)),
 
-        // sqlite does not supporting adding a primary key, so do it before step2 in this case
-        #if db_sqlite new DBField("id", db_int).autoinc(), #end
 #if step2
-        #if !db_sqlite new DBField("id", db_int).autoinc(), #end
+        new DBField("id", db_int).autoinc(),
 
         new DBField("man", db_bool).nullable(),
         new DBField("firstname", db_varchar(50)),
 
         new DBField("myenum", db_haxe_enum_simple_as_index("MyEnum")).indexed(),
-        #if !db_sqlite new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ), #end
+        new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate() #if !db_sqlite .onInsert() #end ]) ),
 #end
-        // SQL can't add this column with CURRENT_TIMESTAMP = default(..,'localtime'), so do it in step1 when table is created
-        #if db_sqlite new DBField("registered", db_datetime, cast([ new DBFDCurrentTimestmap().onUpdate().onInsert()]) ), #end
 
 #if step3
         new DBField("man", db_bool), // no more .nullable
@@ -181,7 +178,9 @@ class TestStep1 {
 
   function test() {
     var d = new Date(2010, 1, 20, 1,2,3);
-    var u = new SimpleAliased("Marc", MyEnum.EA, d);
+    var u = new SimpleAliased("Marc", MyEnum.EA, d
+      #if db_sqlite , Date.now() , Date.now() #end
+    );
 
     try{
       // should throw Exception, because its too long
@@ -197,7 +196,10 @@ class TestStep1 {
     var ids = new Array();
     var num = 3;
     for (x in 0 ... num){
-      ids.push(new SimpleAliased("firstname"+x, EA, d).store().idDB);
+      ids.push(new SimpleAliased("firstname"+x, EA, d
+            #if db_sqlite , Date.now() , Date.now() #end
+            ).store().idDB
+      );
     }
     // clear cache
     DBManager.cleanup();

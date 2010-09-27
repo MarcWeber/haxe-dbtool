@@ -256,7 +256,7 @@ class DBFDAutoinc extends DBFieldDecorator {
         }
       case db_sqlite:
         return {
-          extraFieldText : " primary key autoincrement ",
+          extraFieldText : " primary key  ", // this means autoincrement
           sql_before : [],
           sql_after: [],
           sql_remove: []
@@ -1075,13 +1075,16 @@ class DBTable implements IDBSerializable {
       if (mysql_primary_included(new_))
         primary_key = ""; // primary key is set by DBFDAutoinc
 
-      requests = requests.concat(before);
-      requests.push(
-        "CREATE TABLE "+new_.name+ "(\n"
+      return [before, ["CREATE TABLE "+new_.name+ "(\n"
         + fields +"\n"
         + primary_key
-        +")\n");
-      requests = requests.concat(after);
+        +")\n"], after ];
+    }
+    var create_table_requests = function(){
+      var l = create_table();
+      requests = requests.concat(l[0]);
+      requests = requests.concat(l[1]);
+      requests = requests.concat(l[2]);
     }
 
     var drop_table = function(){
@@ -1104,7 +1107,7 @@ class DBTable implements IDBSerializable {
           // create table
             //trace("creating sql for table "+new_.name);
 
-          create_table();
+          create_table_requests();
 
         } else if (new_ == null) {
           // drop table
@@ -1140,7 +1143,7 @@ class DBTable implements IDBSerializable {
 
         if (old == null){
           // create table
-          create_table();
+          create_table_requests();
 
 
         } else if (new_ == null){
@@ -1175,7 +1178,7 @@ class DBTable implements IDBSerializable {
 
         if (old == null){
           // create table
-          create_table();
+          create_table_requests();
 
 
         } else if (new_ == null){
@@ -1185,24 +1188,41 @@ class DBTable implements IDBSerializable {
         } else {
           // change table
 
-          if (old.name != new_.name)
-            throw "changing names not implemnted yet!";
+          if (new_.toString() != old.toString()){
 
-          var changeSets = DBHelper.sep( old == null ? new Array() : old.fields
-                        , new_ == null ? new Array() : new_.fields );
+            // sqlite: sqlite does not support ALTER TABLE .. DROP COLUMN ..
+            // So the simplest strategy seems to be
+            // backup fields to be kept
+            // delete table
+            // recreate table without fields to be deleted
+            // insert fields from backup
+            var l = create_table();
+            var oldNames = new Hash();
+            for (f in old.fields){
+              oldNames.set(f.name, 1);
+            }
+            var backupFields = new List();
+            for (f in new_.fields){
+              if (oldNames.exists(f.name))
+                backupFields.add(f.name);
+            }
 
-          for (n in changeSets.n){ pushAll(true, DBField.toSQL(db_, new_.name, null, n, false)); }
-          for (k in changeSets.k){ pushAll(false, DBField.toSQL(db_, new_.name, k.o, k.n, false)); }
-          for (o in changeSets.o){ pushAll(false, DBField.toSQL(db_, new_.name, o, null, false)); }
+            // requests.push("BEGIN TRANSACTION");
 
-          if (old.primaryKeys != new_.primaryKeys){
-            if (old.primaryKeys.length > 0 && !mysql_primary_included(old))
-              requests.push("ALTER TABLE "+old.name+" DROP KEY "+old.name+"_pkey");
+            var bf = backupFields.join(","); // TODO quote
+            requests.push("CREATE TEMPORARY TABLE table_backup435("+bf+")");
+            requests.push("INSERT INTO table_backup435 SELECT "+bf+" FROM "+old.name);
+            drop_table();
 
-            if (new_.primaryKeys.length > 0 && !mysql_primary_included(new_))
-              requests.push("ALTER TABLE "+new_.name+" ADD PRIMARY KEY ("+new_.primaryKeys.join(", ")+")");
+            // create new table (don't create triggers yet, data has to be inserted first!)
+            requests = requests.concat(l[0]);
+            requests = requests.concat(l[1]);
+            requests.push("INSERT INTO "+new_.name+" ("+bf+") SELECT "+bf+" FROM table_backup435 ");
+            requests.push("DROP TABLE table_backup435");
+            // now add triggers etc
+            requests = requests.concat(l[2]);
+            // requests.push("COMMIT");
           }
-
         }
     } // }}}
 
